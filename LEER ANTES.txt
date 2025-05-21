@@ -1,0 +1,3 @@
+Es importante definir la ruta de la carpeta donde se encontrarán todas las bases de datos, reporte.rmd y dashboard.r.
+
+Esta ruta debe ser definida en "ruta" dentro del dashboard y en "ruta_data" dentro del reporte.rmd.
