@@ -1,0 +1,1158 @@
+---
+title: "Informe de Análisis Económico en Chile"
+author: "Angel T. Llanos Herrera & Felipe S. Neira Rojas"
+date: "`r format(Sys.time(), '%d de %B de %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    theme: cerulean
+    df_print: paged
+
+fontsize: 11pt
+geometry: "left=1in,right=1in,top=1in,bottom=1in"
+params:
+  anho_rango_shiny: !r c(2010, 2024)
+  filtro_categoria_shiny: !r "Estudios"
+  x_var_shiny: !r "IMACEC"
+  y_var_shiny: !r "PIB"
+  tipo_visual_tpm_shiny: !r "Boxplot"
+  tipo_info_shiny: !r "Población"
+  ver_por_shiny: !r "Total"
+  ver_poblacion_shiny: !r "Total"
+  graficos_sector_externo_shiny: !r c("cobre", "dolar")
+  selected_year_shiny: !r 2024
+---
+
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width=10, fig.height=6)
+
+# Cargar librerías necesarias
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(readr)
+library(lubridate)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(DT)
+library(shiny)
+
+ruta_data <- "definir ruta de carpeta donde estan todas las bases de datos, dashboard.r y reporte.rmd"
+
+#ruta_data <- "C:/Users/angel/Desktop/Base de datos Análisis de la Relación entre Inflación, Desempleo, Variación del Dólar y Crecimiento Económico en Chile/" 
+
+# Carga de datos (debe ser independiente del Shiny para el renderizado del Rmd)
+# Re-load data directly in Rmd for self-containment.
+Agregado_Monetario_2010_2024_Mensual <- read_delim(file.path(ruta_data, "Agregado_Monetario_2010_2024_Mensual.csv"), 
+                                                   delim = ";", escape_double = FALSE, locale = locale(decimal_mark = ","), 
+                                                   trim_ws = TRUE)
+Expectativa_IPC_2010_2024_Mensual <- read_csv(file.path(ruta_data, "Expectativa_IPC_2010_2024_Mensual.csv"))
+IMACEC_2010_2024_Mensual <- read_csv(file.path(ruta_data, "IMACEC_2010_2024_Mensual.csv"))
+Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual <- read_csv(file.path(ruta_data, "Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual.csv"))
+PIB_2010_2024_Anual <- read_csv(file.path(ruta_data, "PIB_2010_2024_Anual.csv"))
+Poblacion_Total_Estimaciones_2010_2024_Anual <- read_csv(file.path(ruta_data, "Población_Total_Estimaciones_2010_2024_Anual.csv"))
+Real_IPC_2010_2024_Mensual <- read_delim(file.path(ruta_data, "Real_IPC_2010_2024_Mensual.csv"), 
+                                         delim = ";", escape_double = FALSE, 
+                                         locale = locale(decimal_mark = ","), trim_ws = TRUE)
+Resumen_Residencias_Definitivas_2010_2024 <- read_csv(file.path(ruta_data, "Resumen_Residencias_Definitivas_2010_2024.csv"))
+Sueldo_Minimo_Nominal_2010_2024_Anual <- read_csv(file.path(ruta_data, "Sueldo_Minimo_Nominal_2010_2024_Anual.csv"))
+Tasa_Desempleo_2010_2024_Mensual <- read_csv(file.path(ruta_data, "Tasa_Desempleo_2010_2024_Mensual.csv"))
+Tasa_Interes_2010_2024_Mensual <- read_csv(file.path(ruta_data, "Tasa_Interes_2010_2024_Mensual.csv"))
+USD_CLP_2010_2024_Mensual <- read_delim(file.path(ruta_data, "USD_CLP_2010_2024_Mensual.csv"), 
+                                        delim = ";", escape_double = FALSE, locale = locale(decimal_mark = ","), 
+                                        trim_ws = TRUE)
+
+# Data transformations (as in Shiny app)
+Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual <- Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual %>%
+  mutate(Anho = lubridate::year(as.Date(Anho)))
+Resumen_Residencias_Definitivas_2010_2024 <- Resumen_Residencias_Definitivas_2010_2024 %>%
+  rename(Anho = AÑO)
+
+Agregado_Monetario_2010_2024_Mensual <- Agregado_Monetario_2010_2024_Mensual %>%
+  rename(Anho = Año)
+Poblacion_Total_Estimaciones_2010_2024_Anual <- Poblacion_Total_Estimaciones_2010_2024_Anual %>%
+  mutate(Anho = lubridate::year(as.Date(Anho)))
+PIB_2010_2024_Anual <- PIB_2010_2024_Anual %>%
+  mutate(Anho = lubridate::year(as.Date(Anho)))
+
+# Helper functions for interpretations
+get_dolar_ipc_tpm_interpretation <- function(df_combined) {
+  interpretation <- ""
+  
+  if (nrow(df_combined) == 0) {
+    return("No hay datos disponibles para el rango de años seleccionado.")
+  }
+  
+  # Calculate overall trends
+  mean_dolar_var <- mean(df_combined$Variacion_Dolar * 100, na.rm = TRUE)
+  mean_ipc_var <- mean(df_combined$`Variación IPC`, na.rm = TRUE)
+  mean_tpm <- mean(df_combined$TPM, na.rm = TRUE)
+  
+  interpretation <- paste0("Este gráfico muestra la variación porcentual mensual del Dólar (USD/CLP), el Índice de Precios al Consumidor (IPC) real y la Tasa de Política Monetaria (TPM) para el período entre ",
+                           min(df_combined$Anho), " y ", max(df_combined$Anho), ". ")
+  
+  if (mean_dolar_var > 0) {
+    interpretation <- paste0(interpretation, "Durante este período, el dólar ha mostrado una tendencia general al alza, con una variación promedio mensual del ", round(mean_dolar_var, 2), "%. ")
+  } else {
+    interpretation <- paste0(interpretation, "Durante este período, el dólar ha mostrado una tendencia general a la baja, con una variación promedio mensual del ", round(mean_dolar_var, 2), "%. ")
+  }
+  
+  interpretation <- paste0(interpretation, "La inflación (Variación IPC) ha tenido un promedio mensual del ", round(mean_ipc_var, 2), "%, indicando el comportamiento general de los precios. ")
+  
+  interpretation <- paste0(interpretation, "La Tasa de Política Monetaria (TPM) ha promediado un ", round(mean_tpm, 2), "% en el rango de años, lo que refleja la postura del Banco Central frente a la inflación y el crecimiento económico. ")
+  
+  # Look for specific events (e.g., sharp changes)
+  max_dolar_var_month <- df_combined %>% filter(Variacion_Dolar == max(Variacion_Dolar, na.rm = TRUE))
+  min_dolar_var_month <- df_combined %>% filter(Variacion_Dolar == min(Variacion_Dolar, na.rm = TRUE))
+  
+  if (nrow(max_dolar_var_month) > 0 && max_dolar_var_month$Variacion_Dolar * 100 > 5) { # Arbitrary threshold for "sharp change"
+    interpretation <- paste0(interpretation, "Se observa un pico notable en la variación del dólar en ", max_dolar_var_month$Mes, " de ", max_dolar_var_month$Anho, " con un aumento del ", round(max_dolar_var_month$Variacion_Dolar * 100, 2), "%. Esto podría indicar un período de inestabilidad económica o cambios en las expectativas del mercado. ")
+  }
+  
+  if (nrow(min_dolar_var_month) > 0 && min_dolar_var_month$Variacion_Dolar * 100 < -5) {
+    interpretation <- paste0(interpretation, "Por otro lado, una caída significativa del dólar se registró en ", min_dolar_var_month$Mes, " de ", min_dolar_var_month$Anho, " con una disminución del ", round(min_dolar_var_month$Variacion_Dolar * 100, 2), "%. ")
+  }
+  
+  # Analyze relationship between IPC and TPM
+  if (mean_ipc_var > mean_tpm) {
+    interpretation <- paste0(interpretation, "Es relevante notar que, en general, la inflación ha sido superior a la TPM promedio en este periodo, lo que puede tener implicaciones en el poder adquisitivo y las decisiones de política monetaria. ")
+  } else if (mean_tpm > mean_ipc_var && mean_tpm > 0) {
+    interpretation <- paste0(interpretation, "La TPM ha sido en promedio superior a la inflación en este periodo, sugiriendo una política monetaria más contractiva para contener el alza de precios. ")
+  }
+  
+  return(interpretation)
+}
+
+get_migracion_desempleo_interpretation <- function(data_plot, filtro_categoria, Anho_min, Anho_max) {
+  interpretation <- paste0("Este gráfico de barras apiladas muestra la distribución de residencias definitivas por su ", tolower(filtro_categoria), " para el período de ", Anho_min, " a ", Anho_max, ", superpuesto con la tasa de desempleo anual (etiquetas numéricas). ")
+  
+  if (nrow(data_plot) == 0) {
+    return("No hay datos de migración para el rango de años y categoría seleccionados.")
+  }
+  
+  # Overall trends
+  total_migrants_initial <- data_plot %>% filter(Anho == Anho_min) %>% summarise(total = sum(personas, na.rm = TRUE)) %>% pull(total)
+  total_migrants_final <- data_plot %>% filter(Anho == Anho_max) %>% summarise(total = sum(personas, na.rm = TRUE)) %>% pull(total)
+  
+  if (total_migrants_final > total_migrants_initial) {
+    interpretation <- paste0(interpretation, "Se observa un aumento en el número total de residencias definitivas a lo largo del período, pasando de aproximadamente ", scales::comma(total_migrants_initial), " en ", Anho_min, " a ", scales::comma(total_migrants_final), " en ", Anho_max, ". ")
+  } else if (total_migrants_final < total_migrants_initial) {
+    interpretation <- paste0(interpretation, "El número total de residencias definitivas ha disminuido a lo largo del período, de aproximadamente ", scales::comma(total_migrants_initial), " en ", Anho_min, " a ", scales::comma(total_migrants_final), " en ", Anho_max, ". ")
+  } else {
+    interpretation <- paste0(interpretation, "El número total de residencias definitivas se ha mantenido relativamente estable. ")
+  }
+  
+  # Highest/Lowest category
+  if (filtro_categoria == "Estudios") {
+    most_common_study <- data_plot %>% 
+      group_by(categoria) %>% summarise(total = sum(personas, na.rm = TRUE)) %>% 
+      filter(grepl("^ESTUDIOS_", categoria)) %>% arrange(desc(total)) %>% slice(1) %>% pull(categoria)
+    interpretation <- paste0(interpretation, "Dentro de las categorías de estudios, la más común es '", gsub("ESTUDIOS_", "", most_common_study), "'. ")
+  } else if (filtro_categoria == "Actividad") {
+    most_common_activity <- data_plot %>% 
+      group_by(categoria) %>% summarise(total = sum(personas, na.rm = TRUE)) %>% 
+      filter(grepl("^ACTIVIDAD_", categoria)) %>% arrange(desc(total)) %>% slice(1) %>% pull(categoria)
+    interpretation <- paste0(interpretation, "En cuanto a la actividad, la categoría con mayor número de personas es '", gsub("ACTIVIDAD_", "", most_common_activity), "'. ")
+  }
+  
+  # Relationship with unemployment
+  desempleo_range <- range(data_plot$Tasa_Desempleo_Prom, na.rm = TRUE)
+  interpretation <- paste0(interpretation, "La tasa de desempleo nacional fluctuó entre un mínimo de ", round(min(desempleo_range), 1), "% y un máximo de ", round(max(desempleo_range), 1), "% durante el período. ")
+  
+  # Check for inverse or direct relationships (simplified)
+  desempleo_anual <- data_plot %>% distinct(Anho, Tasa_Desempleo_Prom) %>% arrange(Anho)
+  migrantes_anual <- data_plot %>% group_by(Anho) %>% summarise(Total_Migrantes = sum(personas, na.rm = TRUE)) %>% arrange(Anho)
+  
+  combined_for_corr <- inner_join(desempleo_anual, migrantes_anual, by = "Anho")
+  
+  if (nrow(combined_for_corr) > 1) {
+    correlation_val <- cor(combined_for_corr$Tasa_Desempleo_Prom, combined_for_corr$Total_Migrantes, use = "pairwise.complete.obs")
+    if (!is.na(correlation_val)) {
+      if (correlation_val > 0.5) {
+        interpretation <- paste0(interpretation, "Existe una correlación positiva moderada a fuerte (r = ", round(correlation_val, 2), ") entre el número total de migrantes y la tasa de desempleo, lo que podría sugerir que periodos de mayor inmigración coinciden con incrementos en el desempleo. ")
+      } else if (correlation_val < -0.5) {
+        interpretation <- paste0(interpretation, "Se observa una correlación negativa moderada a fuerte (r = ", round(correlation_val, 2), ") entre el número total de migrantes y la tasa de desempleo, lo que podría indicar que el aumento de la inmigración se asocia con una disminución del desempleo. ")
+      } else {
+        interpretation <- paste0(interpretation, "La correlación entre el número total de migrantes y la tasa de desempleo es débil (r = ", round(correlation_val, 2), "), sugiriendo que otros factores tienen una influencia más dominante. ")
+      }
+    }
+  }
+  
+  return(interpretation)
+}
+
+
+get_macro_correlation_interpretation <- function(cm_cor, pmat_val) {
+  interpretation <- "Los mapas de calor muestran las correlaciones de Pearson entre los principales indicadores macroeconómicos anuales y sus niveles de significancia (p-valores). "
+  
+  if (nrow(cm_cor) < 2 || ncol(cm_cor) < 2) {
+    return("No hay suficientes datos para calcular correlaciones entre indicadores macroeconómicos.")
+  }
+
+  strong_positive <- c()
+  strong_negative <- c()
+  
+  for (i in 1:(nrow(cm_cor) - 1)) {
+    for (j in (i + 1):ncol(cm_cor)) {
+      if (!is.na(cm_cor[i, j]) && !is.na(pmat_val[i, j])) {
+        if (pmat_val[i, j] < 0.05) {
+          if (cm_cor[i, j] > 0.7) {
+            strong_positive <- c(strong_positive, paste0(rownames(cm_cor)[i], " y ", colnames(cm_cor)[j], " (", round(cm_cor[i, j], 2), ")"))
+          } else if (cm_cor[i, j] < -0.7) {
+            strong_negative <- c(strong_negative, paste0(rownames(cm_cor)[i], " y ", colnames(cm_cor)[j], " (", round(cm_cor[i, j], 2), ")"))
+          }
+        }
+      }
+    }
+  }
+  
+  if (length(strong_positive) > 0) {
+    interpretation <- paste0(
+      interpretation,
+      "Se observan correlaciones positivas fuertes y significativas entre: ",
+      paste(strong_positive, collapse = ", "),
+      ". Esto indica que estas variables tienden a moverse en la misma dirección. "
+    )
+  }
+  if (length(strong_negative) > 0) {
+    interpretation <- paste0(
+      interpretation,
+      "Por otro lado, se identifican correlaciones negativas fuertes y significativas entre: ",
+      paste(strong_negative, collapse = ", "),
+      ". Lo que sugiere que estas variables tienden a moverse en direcciones opuestas. "
+    )
+  }
+  
+  if (length(strong_positive) == 0 && length(strong_negative) == 0) {
+    interpretation <- paste0(
+      interpretation,
+      "No se encontraron correlaciones fuertes y estadísticamente significativas entre los indicadores seleccionados en este período. Esto puede indicar una baja interdependencia lineal o la necesidad de explorar relaciones no lineales. "
+    )
+  }
+  
+  return(interpretation)
+}
+
+
+get_endeudamiento_interpretation <- function(df_endeudamiento, Anho_min, Anho_max) {
+  interpretation <- paste0("El gráfico de barras muestra el Préstamo o Endeudamiento Neto del Gobierno de Chile para el período de ", Anho_min, " a ", Anho_max, ". ")
+  
+  if (nrow(df_endeudamiento) == 0) {
+    return("No hay datos de endeudamiento disponibles para el rango de años seleccionado.")
+  }
+  
+  net_debt <- df_endeudamiento$Endeudamiento
+  
+  if (all(net_debt >= 0, na.rm = TRUE)) {
+    interpretation <- paste0(interpretation, "Durante todo el período, el gobierno ha registrado un endeudamiento neto positivo, lo que indica que ha tenido que recurrir a préstamos para financiar su gasto. ")
+  } else if (all(net_debt < 0, na.rm = TRUE)) {
+    interpretation <- paste0(interpretation, "En todo el período, el gobierno ha registrado un superávit (préstamo neto negativo), lo que significa que sus ingresos superaron sus gastos. ")
+  } else {
+    positive_years <- df_endeudamiento %>% filter(Endeudamiento >= 0) %>% pull(Anho)
+    negative_years <- df_endeudamiento %>% filter(Endeudamiento < 0) %>% pull(Anho)
+    
+    if (length(positive_years) > 0) {
+      interpretation <- paste0(interpretation, "Se observan años con endeudamiento neto positivo (indicados en verde), como ", paste(positive_years, collapse = ", "), ", lo que implica que el gobierno tuvo un déficit. ")
+    }
+    if (length(negative_years) > 0) {
+      interpretation <- paste0(interpretation, "Por otro lado, hubo años con superávit (indicados en rojo), como ", paste(negative_years, collapse = ", "), ", donde los ingresos superaron a los gastos. ")
+    }
+  }
+  
+  max_debt_year <- df_endeudamiento %>% arrange(desc(Endeudamiento)) %>% slice(1)
+  min_debt_year <- df_endeudamiento %>% arrange(Endeudamiento) %>% slice(1)
+  
+  interpretation <- paste0(interpretation, "El año con mayor endeudamiento neto fue ", max_debt_year$Anho, " con ", scales::comma(max_debt_year$Endeudamiento), " millones de CLP. El año con el menor endeudamiento (o mayor superávit) fue ", min_debt_year$Anho, " con ", scales::comma(min_debt_year$Endeudamiento), " millones de CLP. ")
+  
+  return(interpretation)
+}
+
+get_tpm_interpretation <- function(df_tpm, tipo_visual_tpm, Anho_min, Anho_max) {
+  interpretation <- ""
+  
+  if (nrow(df_tpm) == 0) {
+    return("No hay datos de TPM disponibles para el rango de años seleccionado.")
+  }
+  
+  if (tipo_visual_tpm == "Boxplot") {
+    interpretation <- paste0("Este gráfico de caja (Boxplot) ilustra la distribución mensual de la Tasa de Política Monetaria (TPM) para cada año entre ", Anho_min, " y ", Anho_max, ". ")
+    
+    # Analyze median and spread
+    tpm_summary <- df_tpm %>%
+      group_by(Anho) %>%
+      summarise(
+        Mediana = median(TPM, na.rm = TRUE),
+        Rango_Intercuartil = IQR(TPM, na.rm = TRUE),
+        Min = min(TPM, na.rm = TRUE),
+        Max = max(TPM, na.rm = TRUE)
+      ) %>%
+      ungroup()
+    
+    peak_tpm_year <- tpm_summary %>% arrange(desc(Mediana)) %>% slice(1)
+    lowest_tpm_year <- tpm_summary %>% arrange(Mediana) %>% slice(1)
+    
+    interpretation <- paste0(interpretation, "Se observa que la mediana de la TPM varía anualmente, alcanzando un valor máximo en el año ", peak_tpm_year$Anho, " (mediana de ", round(peak_tpm_year$Mediana, 2), "%) y un valor mínimo en el año ", lowest_tpm_year$Anho, " (mediana de ", round(lowest_tpm_year$Mediana, 2), "%). ")
+    
+    if (any(tpm_summary$Rango_Intercuartil > 1, na.rm = TRUE)) { # Arbitrary threshold for high variability
+      high_variability_years <- tpm_summary %>% filter(Rango_Intercuartil > 1) %>% pull(Anho)
+      interpretation <- paste0(interpretation, "Años como ", paste(high_variability_years, collapse = ", "), " muestran una mayor dispersión en la TPM mensual, lo que sugiere una mayor volatilidad en la política monetaria. ")
+    }
+    
+  } else { # Serie de Tiempo
+    interpretation <- paste0("Esta serie de tiempo muestra la evolución mensual de la Tasa de Política Monetaria (TPM) en Chile desde ", Anho_min, " hasta ", Anho_max, ". ")
+    
+    # Identify periods of increase/decrease
+    initial_tpm <- df_tpm %>% filter(Fecha == min(Fecha, na.m = TRUE)) %>% pull(TPM)
+    final_tpm <- df_tpm %>% filter(Fecha == max(Fecha, na.m = TRUE)) %>% pull(TPM)
+    
+    if (final_tpm > initial_tpm) {
+      interpretation <- paste0(interpretation, "La TPM ha experimentado un aumento general en el período, comenzando en ", round(initial_tpm, 2), "% y finalizando en ", round(final_tpm, 2), "%. ")
+    } else if (final_tpm < initial_tpm) {
+      interpretation <- paste0(interpretation, "Se observa una tendencia general a la baja en la TPM durante el período, de ", round(initial_tpm, 2), "% a ", round(final_tpm, 2), "%. ")
+    } else {
+      interpretation <- paste0(interpretation, "La TPM se ha mantenido relativamente estable. ")
+    }
+    
+    max_tpm_val <- df_tpm %>% filter(TPM == max(TPM, na.rm = TRUE)) %>% slice(1)
+    min_tpm_val <- df_tpm %>% filter(TPM == min(TPM, na.rm = TRUE)) %>% slice(1)
+    
+    interpretation <- paste0(interpretation, "El valor máximo de la TPM se alcanzó en ", format(max_tpm_val$Fecha, "%B %Y"), " (", round(max_tpm_val$TPM, 2), "%), mientras que el valor mínimo se registró en ", format(min_tpm_val$Fecha, "%B %Y"), " (", round(min_tpm_val$TPM, 2), "%). ")
+  }
+  
+  return(interpretation)
+}
+
+get_desempleo_interpretation <- function(df_desempleo, Anho_min, Anho_max) {
+  interpretation <- paste0("Este gráfico de línea representa la evolución de la Tasa de Desempleo Promedio Anual en Chile desde ", Anho_min, " hasta ", Anho_max, ". ")
+  
+  if (nrow(df_desempleo) == 0) {
+    return("No hay datos de desempleo disponibles para el rango de años seleccionado.")
+  }
+  
+  initial_rate <- df_desempleo %>% filter(Anho == min(Anho)) %>% pull(Tasa_Desempleo_Prom)
+  final_rate <- df_desempleo %>% filter(Anho == max(Anho)) %>% pull(Tasa_Desempleo_Prom)
+  
+  interpretation <- paste0(interpretation, "La tasa de desempleo comenzó en ", round(initial_rate, 2), "% en ", Anho_min, " y terminó en ", round(final_rate, 2), "% en ", Anho_max, ". ")
+  
+  max_desempleo_year <- df_desempleo %>% arrange(desc(Tasa_Desempleo_Prom)) %>% slice(1)
+  min_desempleo_year <- df_desempleo %>% arrange(Tasa_Desempleo_Prom) %>% slice(1)
+  
+  interpretation <- paste0(interpretation, "El pico de desempleo se observó en ", max_desempleo_year$Anho, " con una tasa del ", round(max_desempleo_year$Tasa_Desempleo_Prom, 2), "%, mientras que el nivel más bajo se registró en ", min_desempleo_year$Anho, " con un ", round(min_desempleo_year$Tasa_Desempleo_Prom, 2), "%. ")
+  
+  return(interpretation)
+}
+
+get_poblacion_interpretation <- function(df_poblacion, ver_poblacion, Anho_min, Anho_max) {
+  interpretation <- paste0("Este gráfico de línea muestra la distribución de la población total en Chile desde ", Anho_min, " hasta ", Anho_max, ", desglosada por ", tolower(ver_poblacion), ". ")
+  
+  if (nrow(df_poblacion) == 0) {
+    return("No hay datos de población disponibles para el rango de años seleccionado.")
+  }
+  
+  total_initial <- df_poblacion %>% filter(Anho == Anho_min, categoria == "Total") %>% pull(personas)
+  total_final <- df_poblacion %>% filter(Anho == Anho_max, categoria == "Total") %>% pull(personas)
+  
+  interpretation <- paste0(interpretation, "La población total ha crecido de aproximadamente ", scales::comma(total_initial), " a ", scales::comma(total_final), " personas durante el período. ")
+  
+  if ("Sexo" %in% ver_poblacion) {
+    hombres_final <- df_poblacion %>% filter(Anho == Anho_max, categoria == "Hombres") %>% pull(personas)
+    mujeres_final <- df_poblacion %>% filter(Anho == Anho_max, categoria == "Mujeres") %>% pull(personas)
+    
+    if (hombres_final > mujeres_final) {
+      interpretation <- paste0(interpretation, "En el último año, la población de hombres (", scales::comma(hombres_final), ") es ligeramente mayor que la de mujeres (", scales::comma(mujeres_final), "). ")
+    } else if (mujeres_final > hombres_final) {
+      interpretation <- paste0(interpretation, "En el último año, la población de mujeres (", scales::comma(mujeres_final), ") es ligeramente mayor que la de hombres (", scales::comma(hombres_final), "). ")
+    } else {
+      interpretation <- paste0(interpretation, "La distribución por sexo se mantiene equilibrada. ")
+    }
+  }
+  
+  return(interpretation)
+}
+
+get_cobre_dolar_interpretation <- function(df_cobre, df_dolar, graficos_seleccionados, Anho_min, Anho_max) {
+  interpretation <- paste0("Esta sección presenta el análisis del sector externo de Chile para el período ", Anho_min, " a ", Anho_max, ". ")
+  
+  if ("cobre" %in% graficos_seleccionados && nrow(df_cobre) > 0) {
+    initial_cobre <- df_cobre %>% filter(Anho == min(Anho)) %>% pull(`1.2. Cobre bruto`)
+    final_cobre <- df_cobre %>% filter(Anho == max(Anho)) %>% pull(`1.2. Cobre bruto`)
+    
+    interpretation <- paste0(interpretation, "Las exportaciones de cobre bruto, un pilar fundamental de la economía chilena, han evolucionado de ", scales::comma(initial_cobre, accuracy=0.01), " a ", scales::comma(final_cobre, accuracy=0.01), " miles de millones de CLP en este período. ")
+    
+    max_cobre_year <- df_cobre %>% arrange(desc(`1.2. Cobre bruto`)) %>% slice(1)
+    min_cobre_year <- df_cobre %>% arrange(`1.2. Cobre bruto`) %>% slice(1)
+    interpretation <- paste0(interpretation, "El valor máximo de exportación de cobre se registró en ", max_cobre_year$Anho, " (", scales::comma(max_cobre_year$`1.2. Cobre bruto`, accuracy=0.01), " miles de millones de CLP). ")
+  }
+  
+  if ("dolar" %in% graficos_seleccionados && nrow(df_dolar) > 0) {
+    initial_dolar <- df_dolar %>% filter(Anho == min(Anho)) %>% pull(Dolar_Promedio)
+    final_dolar <- df_dolar %>% filter(Anho == max(Anho)) %>% pull(Dolar_Promedio)
+    
+    interpretation <- paste0(interpretation, "El valor promedio anual del dólar (USD/CLP) se ha movido de ", round(initial_dolar, 2), " a ", round(final_dolar, 2), " CLP por dólar. ")
+    
+    max_dolar_year <- df_dolar %>% arrange(desc(Dolar_Promedio)) %>% slice(1)
+    min_dolar_year <- df_dolar %>% arrange(Dolar_Promedio) %>% slice(1)
+    interpretation <- paste0(interpretation, "El año con el dólar más alto fue ", max_dolar_year$Anho, " (promedio de ", round(max_dolar_year$Dolar_Promedio, 2), " CLP). ")
+  }
+  
+  if ("cobre" %in% graficos_seleccionados && "dolar" %in% graficos_seleccionados) {
+    # Attempt to join and correlate if both are selected
+    combined_df <- inner_join(df_cobre %>% select(Anho, Cobre_Bruto = `1.2. Cobre bruto`), 
+                              df_dolar %>% select(Anho, Dolar_Promedio), by = "Anho")
+    
+    if (nrow(combined_df) > 1) {
+      correlation_cobre_dolar <- cor(combined_df$Cobre_Bruto, combined_df$Dolar_Promedio, use = "pairwise.complete.obs")
+      if (!is.na(correlation_cobre_dolar)) {
+        if (correlation_cobre_dolar > 0.5) {
+          interpretation <- paste0(interpretation, "Se observa una correlación positiva moderada a fuerte (r = ", round(correlation_cobre_dolar, 2), ") entre las exportaciones de cobre y el valor del dólar, sugiriendo que un aumento en el precio del cobre podría estar asociado con un aumento del tipo de cambio. ")
+        } else if (correlation_cobre_dolar < -0.5) {
+          interpretation <- paste0(interpretation, "Existe una correlación negativa moderada a fuerte (r = ", round(correlation_cobre_dolar, 2), ") entre las exportaciones de cobre y el valor del dólar, lo que podría indicar que un aumento en el precio del cobre se asocia con una apreciación del peso chileno (dólar más bajo). ")
+        } else {
+          interpretation <- paste0(interpretation, "La correlación entre las exportaciones de cobre y el valor del dólar es débil (r = ", round(correlation_cobre_dolar, 2), "), lo que sugiere que su relación directa es menos pronunciada. ")
+        }
+      }
+    }
+  }
+  
+  return(interpretation)
+}
+
+# Reactives re-defined locally for Rmd rendering, using params
+# Resumen Tab
+df_dolar_ipc_tpm <- reactive({
+  df_dolar <- USD_CLP_2010_2024_Mensual %>%
+    filter(Anho >= params$anho_rango_shiny[1],
+           Anho <= params$anho_rango_shiny[2]) %>%
+    arrange(Anho, Mes) %>%
+    mutate(Variacion_Dolar = (`Dólar` / lag(`Dólar`) - 1))
+  
+  df_ipc <- Real_IPC_2010_2024_Mensual %>%
+    filter(Anho >= params$anho_rango_shiny[1],
+           Anho <= params$anho_rango_shiny[2]) %>%
+    arrange(Anho, Mes)
+  
+  df_tpm_local <- Tasa_Interes_2010_2024_Mensual %>%
+    filter(Anho >= params$anho_rango_shiny[1],
+           Anho <= params$anho_rango_shiny[2]) %>%
+    arrange(Anho, Mes) %>%
+    rename(TPM = `1. Tasa de política monetaria (TPM) (porcentaje)`)
+  
+  meses_es <- c("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
+  
+  df_dolar %>%
+    inner_join(df_ipc, by = c("Anho", "Mes")) %>%
+    inner_join(df_tpm_local, by = c("Anho", "Mes")) %>%
+    mutate(Fecha = as.Date(paste0(Anho, "-", match(Mes, meses_es), "-01")))
+})
+
+df_resumen_migracion_desempleo <- reactive({
+  df_mig <- Resumen_Residencias_Definitivas_2010_2024 %>%
+    select(Anho,
+           starts_with("ESTUDIOS_"),
+           starts_with("ACTIVIDAD_")) %>%
+    group_by(Anho) %>%
+    summarise(across(everything(), sum, na.rm = TRUE)) %>%
+    ungroup()
+  
+  data_long <- df_mig %>%
+    pivot_longer(
+      cols = -Anho,
+      names_to = "categoria",
+      values_to = "personas"
+    )
+  
+  if (params$filtro_categoria_shiny == "Estudios") {
+    categorias_filtradas <- grep("^ESTUDIOS_", data_long$categoria, value = TRUE)
+  } else {
+    categorias_filtradas <- grep("^ACTIVIDAD_", data_long$categoria, value = TRUE)
+  }
+  
+  tasa_desempleo_anual_local <- Tasa_Desempleo_2010_2024_Mensual %>%
+    mutate(Anho = as.numeric(Anho)) %>%
+    group_by(Anho) %>%
+    summarise(Tasa_Desempleo_Prom = mean(`1. Nacional`, na.rm = TRUE)) %>%
+    filter(Anho >= params$anho_rango_shiny[1], Anho <= params$anho_rango_shiny[2])
+  
+  data_long %>%
+    filter(categoria %in% categorias_filtradas) %>%
+    left_join(tasa_desempleo_anual_local, by = "Anho") %>%
+    filter(Anho >= params$anho_rango_shiny[1], Anho <= params$anho_rango_shiny[2]) # Re-filter to ensure range
+})
+
+
+# Indicadores Macroeconómicos Tab
+Reactive_Macro_Datos_Local <- reactive({
+    imacec <- IMACEC_2010_2024_Mensual %>%
+      group_by(Anho) %>%
+      summarise(IMACEC = mean(`1. Imacec`, na.rm = TRUE), .groups = "drop") %>%
+      mutate(
+        Fecha = as.Date(sprintf("%d-01-01", Anho)),
+        IMACEC = (IMACEC / lag(IMACEC) - 1) * 100
+      ) %>%
+      filter(!is.na(IMACEC)) %>%
+      select(Fecha, IMACEC)
+    
+    pib <- PIB_2010_2024_Anual %>%
+      filter(Anho >= params$anho_rango_shiny[1], Anho <= params$anho_rango_shiny[2]) %>%
+      mutate(
+        Fecha = as.Date(sprintf("%d-01-01", Anho)),
+        PIB   = (`1. PIB a precios corrientes` / lag(`1. PIB a precios corrientes`) - 1) * 100
+      ) %>%
+      select(Fecha, PIB) %>%
+      filter(!is.na(PIB))
+    
+    tpm_macro <- Tasa_Interes_2010_2024_Mensual %>%
+      group_by(Anho) %>%
+      summarise(TPM = mean(`1. Tasa de política monetaria (TPM) (porcentaje)`, na.rm = TRUE), .groups = "drop") %>%
+      mutate(
+        Fecha = as.Date(sprintf("%d-01-01", Anho)),
+        TPM = (TPM / lag(TPM) - 1) * 100
+      ) %>%
+      filter(!is.na(TPM)) %>%
+      select(Fecha, TPM)
+    
+    expect_ipc <- Expectativa_IPC_2010_2024_Mensual %>%
+      group_by(Anho) %>%
+      summarise(Expectativa_IPC = mean(Expectativa, na.rm = TRUE), .groups = "drop") %>%
+      mutate(
+        Fecha = as.Date(sprintf("%d-01-01", Anho)),
+        Expectativa_IPC = (Expectativa_IPC / lag(Expectativa_IPC) - 1) * 100
+      ) %>%
+      filter(!is.na(Expectativa_IPC)) %>%
+      select(Fecha, Expectativa_IPC)
+    
+    real_ipc <- Real_IPC_2010_2024_Mensual %>%
+      group_by(Anho) %>%
+      summarise(Real_IPC = mean(`Variación IPC`, na.rm = TRUE), .groups = "drop") %>%
+      mutate(
+        Fecha = as.Date(sprintf("%d-01-01", Anho)),
+        Real_IPC = (Real_IPC / lag(Real_IPC) - 1) * 100
+      ) %>%
+      filter(!is.na(Real_IPC)) %>%
+      select(Fecha, Real_IPC)
+    
+    M0 <- Agregado_Monetario_2010_2024_Mensual %>%
+      group_by(Anho) %>%
+      summarise(M0 = mean(M0, na.rm = TRUE), .groups = "drop") %>%
+      mutate(
+        Fecha = as.Date(sprintf("%d-01-01", Anho)),
+        M0 = (M0 / lag(M0) - 1) * 100
+      ) %>%
+      filter(!is.na(M0)) %>%
+      select(Fecha, M0)
+    
+    M1 <- Agregado_Monetario_2010_2024_Mensual %>%
+      group_by(Anho) %>%
+      summarise(M1 = mean(M1, na.rm = TRUE), .groups = "drop") %>%
+      mutate(
+        Fecha = as.Date(sprintf("%d-01-01", Anho)),
+        M1 = (M1 / lag(M1) - 1) * 100
+      ) %>%
+      filter(!is.na(M1)) %>%
+      select(Fecha, M1)
+    
+    M2 <- Agregado_Monetario_2010_2024_Mensual %>%
+      group_by(Anho) %>%
+      summarise(M2 = mean(M2, na.rm = TRUE), .groups = "drop") %>%
+      mutate(
+        Fecha = as.Date(sprintf("%d-01-01", Anho)),
+        M2 = (M2 / lag(M2) - 1) * 100
+      ) %>%
+      filter(!is.na(M2)) %>%
+      select(Fecha, M2)
+    
+    df <- imacec %>%
+      inner_join(pib,         by = "Fecha") %>%
+      inner_join(tpm_macro,         by = "Fecha") %>%
+      inner_join(expect_ipc,  by = "Fecha") %>%
+      inner_join(real_ipc,    by = "Fecha") %>%
+      inner_join(M0,          by = "Fecha") %>%
+      inner_join(M1,          by = "Fecha") %>%
+      inner_join(M2,          by = "Fecha")
+    
+    df
+  })
+
+Reactive_Macro_Datos_Normalizado_Local <- reactive({
+    df <- Reactive_Macro_Datos_Local()
+    
+    df %>%
+      mutate(across(
+        .cols = -Fecha,
+        .fns  = ~ {
+          min_val <- min(., na.rm = TRUE)
+          max_val <- max(., na.rm = TRUE)
+          if (max_val == min_val) {
+            rep(0, length(.))
+          } else {
+            2 * ((. - min_val) / (max_val - min_val)) - 1
+          }
+        }
+      ))
+  })
+
+cor_pmat <- function(df) {
+    mat <- matrix(NA, ncol = ncol(df), nrow = ncol(df))
+    colnames(mat) <- rownames(mat) <- colnames(df)
+    
+    for (i in 1:ncol(df)) {
+      for (j in 1:ncol(df)) {
+        x <- df[[i]]
+        y <- df[[j]]
+        test <- try(cor.test(x, y, method = "pearson"), silent = TRUE)
+        mat[i, j] <- if (inherits(test, "try-error")) NA else test$p.value
+      }
+    }
+    
+    return(mat)
+  }
+
+# Finanzas Públicas Tab
+df_endeudamiento_local <- reactive({
+  Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual %>%
+    filter(Anho >= params$anho_rango_shiny[1],
+           Anho <= params$anho_rango_shiny[2]) %>%
+    select(Anho, Endeudamiento = `7. Préstamo o endeudamiento neto`)
+})
+
+df_tpm_finanzas_local <- reactive({
+  meses_es <- c("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
+  Tasa_Interes_2010_2024_Mensual %>%
+    rename(TPM = `1. Tasa de política monetaria (TPM) (porcentaje)`) %>%
+    filter(Anho >= params$anho_rango_shiny[1],
+           Anho <= params$anho_rango_shiny[2]) %>%
+    mutate(Fecha = as.Date(paste0(Anho, "-", match(Mes, meses_es), "-01")))
+})
+
+# Mercado Laboral y Demografía Tab
+df_desempleo_local <- reactive({
+  Tasa_Desempleo_2010_2024_Mensual %>%
+    mutate(Anho = as.numeric(Anho)) %>%
+    group_by(Anho) %>%
+    summarise(Tasa_Desempleo_Prom = mean(`1. Nacional`, na.rm = TRUE)) %>%
+    filter(Anho >= params$anho_rango_shiny[1], Anho <= params$anho_rango_shiny[2])
+})
+
+df_poblacion_local <- reactive({
+  Poblacion_Total_Estimaciones_2010_2024_Anual %>%
+    filter(Anho >= params$anho_rango_shiny[1],
+           Anho <= params$anho_rango_shiny[2]) %>%
+    select(Anho, `1. Total`, `1.1. Hombres`, `1.2. Mujeres`) %>%
+    rename(
+      Total = `1. Total`,
+      Hombres = `1.1. Hombres`,
+      Mujeres = `1.2. Mujeres`
+    ) %>%
+    group_by(Anho) %>%
+    summarise(across(everything(), sum, na.rm = TRUE), .groups = "drop") %>%
+    pivot_longer(-Anho, names_to = "categoria", values_to = "personas")
+})
+
+df_migracion_torta_local <- reactive({
+    df <- Resumen_Residencias_Definitivas_2010_2024 %>%
+      filter(Anho == params$selected_year_shiny) %>% # Use the parameter here
+      select(Anho, total_personas, hombres, mujeres, starts_with("ESTUDIOS_"), starts_with("ACTIVIDAD_")) %>%
+      group_by(Anho) %>%
+      summarise(across(everything(), sum, na.rm = TRUE)) %>%
+      ungroup()
+    
+    filtros <- switch(params$ver_por_shiny, # Use the parameter here
+                      "Total" = c("total_personas"),
+                      "Sexo" = c("hombres", "mujeres"),
+                      "Estudios" = grep("^ESTUDIOS_", names(df), value = TRUE),
+                      "Actividad" = grep("^ACTIVIDAD_", names(df), value = TRUE)
+    )
+    
+    df_long <- df %>%
+      pivot_longer(
+        cols = all_of(filtros),
+        names_to = "categoria",
+        values_to = "valor"
+      )
+    df_long
+})
+
+
+# Sector Externo Tab
+df_cobre_local <- reactive({
+  Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual %>%
+    filter(Anho >= params$anho_rango_shiny[1],
+           Anho <= params$anho_rango_shiny[2])
+})
+
+df_dolar_anual_local <- reactive({
+  USD_CLP_2010_2024_Mensual %>%
+    filter(Anho >= params$anho_rango_shiny[1],
+           Anho <= params$anho_rango_shiny[2]) %>%
+    group_by(Anho) %>%
+    summarise(Dolar_Promedio = mean(`Dólar`, na.rm = TRUE))
+})
+```
+
+
+Se planteo un estudio de carácter exploratorio el cúal busca identificar patrones temporales de distintas variables macro económicas de Chile, con el fin de conocer si existe relación entre ellas. Además, se consideraron variables demográficas, de población y de desempleo. A continuación presentamos las variables a trabajar.
+
+## Base de datos
+
+Se extrajeron bases de datos con información de distintas variables desde el año 2010 hasta el 2024. Algunas poseen datos mensuales, trimestrales o anuales. Todas estas fueron extraídas del Banco Central de Chile en el siguiente url: "https://si3.bcentral.cl/siete".
+
+Se obtuvieron 12 bases de datos, las cuales son:
+
+- Agregado Monetario: Posee medidas de oferta monetaria mensual en Chile (M0, M1, M2, M3).
+
+- Expectativa IPC: Posee el índice de inflación mensual esperado según los expertos para la fecha especificada.
+
+- IMACEC: Muestra la actividad mensual económica en Chile a nivel general, o en actividades como minería, industria, comercio, servicios, etc.
+
+-Ingreso y Gasto de Gobierno: Posee datos anuales sobre el ingreso y gasto del gobierno, junto con el detalle de estos.
+
+- PIB: Entrega datos sobre el valor de los bienes y servicios producidos anualmente en Chile.
+
+- Población Total: Posee la cantidad de total de población en Chile por año, teniendo la categorización por sexo.
+
+- IPC: Posee el índice de inflación mensual en Chile.
+
+- Residencia: Posee datos sobre la cantidad de migrantes por año, su estudio, nacionalidad y actividad laboral.
+
+- Sueldo Mínimo: Posee datos específicos del Sueldo Mínimo en Chile.
+
+- Tasa de Desempleo: Posee el índice de desempleo por Mes en Chile.
+
+- Tasa de Interés: Tasa de ínterés mensual en Chile.
+
+- Valor del Dólar: Valor del dólar en pesos chilenos (clp) por mes.
+
+### Preguntas de Investigación
+
+Para esta investigación se plantearon las siguientes preguntas:
+
+- ¿Se observan patrones temporales en la evolución conjunta de la inflación, el desempleo, la variación del dólar y el crecimiento económico en Chile entre 2010 y 2024?
+
+- ¿Existe relación entre la tasa de interés y el agregado monetario M1 con respecto a la inflación y el desempleo en el mismo período?
+
+- ¿Cómo han influido variables estructurales como la inmigración y el sueldo mínimo en el comportamiento del mercado laboral y la inflación en Chile?
+
+
+# Resumen
+
+## Variación porcentual mensual: Dólar vs IPC vs TPM
+
+```{r}
+# Use the reactive data defined for the Rmd
+df_combined_plot <- df_dolar_ipc_tpm()
+
+plot_ly(df_combined_plot, x = ~Fecha) %>%
+  add_lines(y = ~Variacion_Dolar * 100, name = "Variación % Dólar", line = list(color = 'blue')) %>%
+  add_lines(y = ~`Variación IPC`, name = "Variación % IPC", line = list(color = 'red')) %>%
+  add_lines(y = ~TPM, name = "TPM (%)", line = list(color = 'green')) %>%
+  layout(
+    title = "Variación Porcentual Mensual: Dólar vs IPC vs TPM",
+    xaxis = list(title = "Fecha"),
+    yaxis = list(title = "Porcentaje (%)"),
+    legend = list(x = 0.05, y = 0.95)
+  )
+```
+
+```{r}
+get_dolar_ipc_tpm_interpretation(df_dolar_ipc_tpm())
+```
+
+
+
+## Relación entre la actividad y estudios de migrantes y la tasa de desempleo
+
+```{r}
+data_plot_migracion <- df_resumen_migracion_desempleo()
+
+data_totals_migracion <- data_plot_migracion %>%
+  group_by(Anho) %>%
+  summarise(Total_Personas = sum(personas, na.rm = TRUE),
+            Tasa_Desempleo_Prom = first(Tasa_Desempleo_Prom)) %>%
+  ungroup()
+
+p_migracion <- plot_ly(data_plot_migracion,
+             x = ~Anho,
+             y = ~personas,
+             color = ~categoria,
+             type = 'bar',
+             text = ~paste0("Año: ", Anho, "<br>",
+                            "Categoría: ", categoria, "<br>",
+                            "Personas: ", personas, "<br>",
+                            "Tasa Desempleo: ", round(Tasa_Desempleo_Prom, 2), "%"),
+             hoverinfo = "text") %>%
+  layout(
+    barmode = "stack",
+    title = list(text = paste("Distribución por", params$filtro_categoria_shiny), y = 0.95),
+    xaxis = list(title = "Año", tickmode = "linear", dtick = 1),
+    yaxis = list(title = "Total de Personas"),
+    legend = list(orientation = "h", x = 0.1, y = -0.3, font = list(size = 10)),
+    margin = list(b = 100)
+  )
+
+p_migracion %>%
+  add_annotations(
+    data = data_totals_migracion,
+    x = ~Anho,
+    y = ~Total_Personas,
+    text = ~paste0(round(Tasa_Desempleo_Prom, 1), "%"),
+    xanchor = 'center',
+    yanchor = 'bottom',
+    showarrow = FALSE,
+    textangle = 0,
+    font = list(size = 10, color = 'black'),
+    yshift = 10
+  )
+```
+
+```{r}
+get_migracion_desempleo_interpretation(df_resumen_migracion_desempleo(), params$filtro_categoria_shiny, params$anho_rango_shiny[1], params$anho_rango_shiny[2])
+```
+
+
+
+# Indicadores macroeconomicos
+
+
+## Heatmap de Correlaciones e Índices de Significancia
+
+```{r}
+df_macro_norm <- Reactive_Macro_Datos_Normalizado_Local() %>% select(-Fecha)
+
+df_macro_norm_filtered <- df_macro_norm[, sapply(df_macro_norm, function(x) var(x, na.rm = TRUE) > 0 && sum(!is.na(x)) > 1)]
+
+cm <- cor(df_macro_norm_filtered, use = "pairwise.complete.obs")
+cm[is.na(cm)] <- 0
+
+if (nrow(cm) > 1) {
+  plot_ly(
+    x = colnames(cm),
+    y = rownames(cm),
+    z = cm,
+    type = "heatmap",
+    zmin = -1,
+    zmax = 1,
+    colorscale = list(
+      c(0, "#FF0000"),
+      c(0.5, "#FFFFFF"),
+      c(1, "#0000FF")
+    ),
+    colorbar = list(title = "correlación")
+  ) %>%
+    layout(
+      title = "Heatmap de Correlaciones para Indicadores Anuales",
+      xaxis = list(tickangle = -45),
+      yaxis = list(autorange = "reversed")
+    )
+} else {
+  plotly_empty() %>% layout(title = "No hay suficientes datos válidos para calcular la correlación.")
+}
+```
+
+```{r}
+pmat <- cor_pmat(df_macro_norm_filtered)
+
+plot_ly(
+  x = colnames(pmat),
+  y = rownames(pmat),
+  z = pmat,
+  type = "heatmap",
+  zmin = 0,
+  zmax = 1,
+  colorscale = "Viridis",
+  colorbar = list(title = "p-valor")
+) %>%
+  layout(
+    title = "Heatmap de Índices de Significancia para Coef. de Correlación",
+    xaxis = list(tickangle = -45),
+    yaxis = list(autorange = "reversed")
+  )
+```
+
+```{r}
+get_macro_correlation_interpretation(cm, pmat)
+```
+
+
+## Serie de Tiempo Comparativa para Índices Macroeconómicos
+
+```{r}
+df_macro_norm_ts <- Reactive_Macro_Datos_Normalizado_Local()
+
+label_map_ts <- list(
+  IMACEC            = "IMACEC",
+  PIB               = "PIB",
+  TPM               = "TPM",
+  Expectativa_IPC   = "Variación IPC Expectativa",
+  Real_IPC          = "Variación IPC real",
+  M0 = "Agregado monetario M0",
+  M1 = "Agregado monetario M1",
+  M2 = "Agregado monetario M2"
+)
+
+p_ts <- plot_ly() %>%
+  add_lines(
+    data = df_macro_norm_ts,
+    x    = ~Fecha,
+    y    = as.formula(paste0("~", params$x_var_shiny)),
+    name = label_map_ts[[params$x_var_shiny]],
+    line = list(width = 2, color = "gray")
+  ) %>%
+  add_lines(
+    data = df_macro_norm_ts,
+    x    = ~Fecha,
+    y    = as.formula(paste0("~", params$y_var_shiny)),
+    name = label_map_ts[[params$y_var_shiny]],
+    line = list(width = 2, dash = "dash", color = "black")
+  ) %>%
+  layout(
+    title      = paste0(label_map_ts[[params$y_var_shiny]], " vs. ", label_map_ts[[params$x_var_shiny]]),
+    xaxis      = list(title = "Fecha", tickangle = -45),
+    yaxis      = list(
+      title     = "Valor normalizado [-1, 1]",
+      zeroline  = FALSE,
+      range     = c(-1, 1),
+      standoff  = 20
+    ),
+    showlegend = TRUE,
+    margin     = list(l = 80, r = 80, t = 80, b = 80),
+    hovermode  = "x unified"
+  )
+p_ts
+```
+
+```{r}
+label_map_ts[[params$x_var_shiny]]
+```
+
+```{r}
+label_map_ts[[params$y_var_shiny]]
+```
+
+
+
+# Finanzas publicas
+
+## Préstamo o Endeudamiento Neto del Gobierno por Año
+
+```{r}
+df_endeudamiento_plot <- df_endeudamiento_local()
+
+plot_ly(
+  data = df_endeudamiento_plot,
+  x = ~Anho,
+  y = ~Endeudamiento,
+  type = 'bar',
+  marker = list(color = ~ifelse(Endeudamiento >= 0, 'green', 'red'))
+) %>%
+  layout(
+    title = "Préstamo o Endeudamiento Neto del Gobierno por Año",
+    xaxis = list(title = "Año"),
+    yaxis = list(title = "Monto en Millones (CLP)"),
+    bargap = 0.3
+  )
+```
+
+```{r}
+get_endeudamiento_interpretation(df_endeudamiento_local(), params$anho_rango_shiny[1], params$anho_rango_shiny[2])
+```
+
+
+## Análisis Mensual y Anual del TPM
+
+```{r}
+df_tpm_plot <- df_tpm_finanzas_local()
+
+if (params$tipo_visual_tpm_shiny == "Boxplot") {
+  plot_ly(
+    data = df_tpm_plot,
+    x = ~as.factor(Anho),
+    y = ~TPM,
+    type = "box",
+    boxpoints = "outliers",
+    name = "TPM por Año",
+    marker = list(color = 'rgba(7, 164, 181, 0.6)'),
+    line = list(color = 'rgba(7, 164, 181, 1)')
+  ) %>%
+    layout(
+      title = "Boxplot para el TPM (%) Anual",
+      xaxis = list(title = "Año"),
+      yaxis = list(title = "TPM (%)")
+    )
+} else {
+  plot_ly(
+    data = df_tpm_plot,
+    x = ~Fecha,
+    y = ~TPM,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "TPM mensual",
+    line = list(color = 'rgba(200, 30, 30, 0.8)', width = 2),
+    marker = list(size = 4)
+  ) %>%
+    layout(
+      title = "Serie de Tiempo Mensual de la TPM",
+      xaxis = list(title = "Año"),
+      yaxis = list(title = "TPM (%)")
+    )
+}
+```
+
+```{r}
+get_tpm_interpretation(df_tpm_finanzas_local(), params$tipo_visual_tpm_shiny, params$anho_rango_shiny[1], params$anho_rango_shiny[2])
+```
+
+
+
+# Mercado laboral y demografía
+
+## Tasa de desempleo anual
+
+```{r}
+df_desempleo_plot_rmd <- df_desempleo_local()
+
+plot_ly(
+  data = df_desempleo_plot_rmd,
+  x = ~Anho,
+  y = ~Tasa_Desempleo_Prom,
+  type = 'scatter',
+  mode = 'lines+markers',
+  line = list(color = 'red'),
+  marker = list(size = 8)
+) %>%
+  layout(
+    title = "Serie de Tiempo para la Tasa de Desempleo Promedio Anual",
+    xaxis = list(title = "Año"),
+    yaxis = list(title = "Tasa de Desempleo (%)"),
+    hovermode = "x unified"
+  )
+
+```
+
+```{r}
+get_desempleo_interpretation(df_desempleo_local(), params$anho_rango_shiny[1], params$anho_rango_shiny[2])
+```
+
+
+## Distribución de Población y Migración
+
+```{r}
+if (params$tipo_info_shiny == 'Población') {
+  df_poblacion_plot_rmd <- df_poblacion_local()
+  
+  categorias_plot_poblacion <- c()
+  if ("Total" %in% params$ver_poblacion_shiny) categorias_plot_poblacion <- c(categorias_plot_poblacion, "Total")
+  if ("Sexo" %in% params$ver_poblacion_shiny) categorias_plot_poblacion <- c(categorias_plot_poblacion, "Hombres", "Mujeres")
+  
+  df_plot_poblacion_filtered <- df_poblacion_plot_rmd %>%
+    filter(categoria %in% categorias_plot_poblacion)
+  
+  plot_ly(df_plot_poblacion_filtered, x = ~Anho, y = ~personas, color = ~categoria,
+          type = 'scatter', mode = 'lines+markers') %>%
+    layout(title = "Serie de Tiempo del Total de la Población según Sexo",
+           xaxis = list(title = "Año"),
+           yaxis = list(title = "Número de Personas (en Millones)"),
+           legend = list(x = 0.05, y = 0.95))
+} else {
+  # This branch will only be hit if params$tipo_info_shiny was changed to 'Migración' AFTER generating the report,
+  # but the conditional panel for 'Población' is set in the UI.
+  # For the PDF, we rely on the parameter.
+  print("Gráfico de población no seleccionado.")
+}
+```
+
+```{r}
+if(params$tipo_info_shiny == 'Población') { get_poblacion_interpretation(df_poblacion_local(), params$ver_poblacion_shiny, params$anho_rango_shiny[1], params$anho_rango_shiny[2]) } else { "La sección de población no fue seleccionada para el informe." }
+```
+
+```{r}
+
+if (params$tipo_info_shiny == 'Migración') {
+  df_migracion_torta_plot <- df_migracion_torta_local()
+  
+  if (nrow(df_migracion_torta_plot) > 0) {
+    plot_ly(
+      data = df_migracion_torta_plot,
+      labels = ~categoria,
+      values = ~valor,
+      type = "pie",
+      insidetextorientation = "radial",
+      marker = list(line = list(color = "#FFFFFF", width = 1))
+    ) %>%
+      layout(
+        title = paste("Distribución:", params$ver_por_shiny, "en", params$selected_year_shiny),
+        showlegend = TRUE
+      )
+  } else {
+    plotly_empty() %>% layout(title = "No hay datos de migración para el año y categoría seleccionados.")
+  }
+} else {
+  print("Gráfico de migración no seleccionado.")
+}
+```
+```{r}
+if(params$tipo_info_shiny == 'Migración') { get_migracion_desempleo_interpretation(df_resumen_migracion_desempleo() %>% filter(Anho == params$selected_year_shiny), params$ver_por_shiny, params$anho_rango_shiny[1], params$anho_rango_shiny[2]) } else { "La sección de migración no fue seleccionada para el informe." }
+```
+
+
+
+
+
+
+# Sector externo
+
+## Exportaciones de Cobre y Valor del Dólar
+
+```{r}
+if ("cobre" %in% params$graficos_sector_externo_shiny) {
+  df_cobre_plot <- df_cobre_local()
+  p_cobre <- plot_ly(
+    data = df_cobre_plot,
+    x = ~Anho,
+    y = ~`1.2. Cobre bruto`,
+    type = 'scatter',
+    mode = 'lines+markers',
+    line = list(color = 'orange'),
+    marker = list(size = 6),
+    name = "Cobre bruto"
+  ) %>%
+    layout(
+      title = "Serie de Tiempo para las Exportaciones de Cobre Bruto",
+      xaxis = list(title = "Año"),
+      yaxis = list(title = "Miles de millones (CLP)", tickformat = ".2f"),
+      hovermode = "x unified"
+    )
+  p_cobre
+}
+
+if ("dolar" %in% params$graficos_sector_externo_shiny) {
+  df_dolar_anual_plot <- df_dolar_anual_local()
+  p_dolar <- plot_ly(
+    data = df_dolar_anual_plot,
+    x = ~Anho,
+    y = ~Dolar_Promedio,
+    type = 'scatter',
+    mode = 'lines+markers',
+    line = list(color = 'blue'),
+    marker = list(size = 6),
+    name = "Dólar Promedio"
+  ) %>%
+    layout(
+      title = "Serie de Tiempo para el Promedio Anual del Dólar",
+      xaxis = list(title = "Año"),
+      yaxis = list(title = "CLP", tickformat = ".2f"),
+      hovermode = "x unified"
+    )
+  p_dolar
+}
+```
+
+```{r}
+get_cobre_dolar_interpretation(df_cobre_local(), df_dolar_anual_local(), params$graficos_sector_externo_shiny, params$anho_rango_shiny[1], params$anho_rango_shiny[2])
+```
