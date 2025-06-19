@@ -1,0 +1,1050 @@
+---
+title: "Informe de Análisis Económico en Chile basada en indicadores macroeconómicos"
+author: "Felipe Neira Rojas & Angel Llanos Herrera"
+date: "`r format(Sys.time(), '%d de %B de %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+params:
+  anho_rango_shiny: [2010, 2024]
+  filtro_categoria_shiny: "Estudios"
+  x_var_shiny: "IMACEC"
+  y_var_shiny: "PIB"
+  tipo_visual_tpm_shiny: "Boxplot"
+  ver_migracion_shiny: "Ninguno"
+  graficos_sector_externo_shiny: ["cobre", "dolar"]
+  tipo_serie_shiny: "sa"
+  serie_elegida_shiny: "IPC"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+
+# Cargar librerías
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(plotly)
+library(lubridate)
+library(tidyr)
+library(stringr)
+library(seasonal)
+library(forecast) # Para autoplot.STL
+
+# Definir la ruta de los datos (ajusta si es necesario)
+ruta <- "C:/Users/angel/Desktop/UNIVERSIDAD/Base de datos Análisis de la Relación entre Inflación, Desempleo, Variación del Dólar y Crecimiento Económico en Chile/"
+setwd(ruta)
+
+# Carga de datos (copiado de app.R para asegurar consistencia)
+Agregado_Monetario_2010_2024_Mensual <- read_delim("Agregado_Monetario_2010_2024_Mensual.csv", 
+                                                   delim = ";", escape_double = FALSE, locale = locale(decimal_mark = ","), 
+                                                   trim_ws = TRUE)
+Expectativa_IPC_2010_2024_Mensual <- read_csv("Expectativa_IPC_2010_2024_Mensual.csv")
+IMACEC_2010_2024_Mensual <- read_csv("IMACEC_2010_2024_Mensual.csv")
+Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual <- read_csv("Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual.csv")
+PIB_2010_2024_Anual <- read_csv("PIB_2010_2024_Anual.csv")
+Poblacion_Total_Estimaciones_2010_2024_Anual <- read_csv("Población_Total_Estimaciones_2010_2024_Anual.csv")
+Real_IPC_2010_2024_Mensual <- read_delim("Real_IPC_2010_2024_Mensual.csv", 
+                                         delim = ";", escape_double = FALSE, 
+                                         locale = locale(decimal_mark = ","), trim_ws = TRUE)
+Resumen_Residencias_Definitivas_2010_2024 <- read_csv("Resumen_Residencias_Definitivas_2010_2024.csv")
+Sueldo_Minimo_Nominal_2010_2024_Anual <- read_csv("Sueldo_Minimo_Nominal_2010_2024_Anual.csv")
+Tasa_Desempleo_2010_2024_Mensual <- read_csv("Tasa_Desempleo_2010_2024_Mensual.csv")
+Tasa_Interes_2010_2024_Mensual <- read_csv("Tasa_Interes_2010_2024_Mensual.csv")
+USD_CLP_2010_2024_Mensual <- read_delim("USD_CLP_2010_2024_Mensual.csv", 
+                                        delim = ";", escape_double = FALSE, locale = locale(decimal_mark = ","), 
+                                        trim_ws = TRUE)
+
+# Normalización de nombres de meses
+Agregado_Monetario_2010_2024_Mensual <- Agregado_Monetario_2010_2024_Mensual %>% mutate(Mes = str_to_title(Mes))
+Expectativa_IPC_2010_2024_Mensual <- Expectativa_IPC_2010_2024_Mensual %>% mutate(Mes = str_to_title(Mes))
+IMACEC_2010_2024_Mensual <- IMACEC_2010_2024_Mensual %>% mutate(Mes = str_to_title(Mes))
+Real_IPC_2010_2024_Mensual <- Real_IPC_2010_2024_Mensual %>% mutate(Mes = str_to_title(Mes))
+Tasa_Desempleo_2010_2024_Mensual <- Tasa_Desempleo_2010_2024_Mensual %>% mutate(Mes = str_to_title(Mes))
+Tasa_Interes_2010_2024_Mensual <- Tasa_Interes_2010_2024_Mensual %>% mutate(Mes = str_to_title(Mes))
+USD_CLP_2010_2024_Mensual <- USD_CLP_2010_2024_Mensual %>% mutate(Mes = str_to_title(Mes))
+
+Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual <- Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual %>%
+  mutate(Anho = lubridate::year(as.Date(Anho)))
+Resumen_Residencias_Definitivas_2010_2024 <- Resumen_Residencias_Definitivas_2010_2024 %>%
+  rename(Anho = AÑO)
+
+Agregado_Monetario_2010_2024_Mensual <- Agregado_Monetario_2010_2024_Mensual %>%
+  rename(Anho = Año)
+Poblacion_Total_Estimaciones_2010_2024_Anual <- Poblacion_Total_Estimaciones_2010_2024_Anual %>%
+  mutate(Anho = lubridate::year(as.Date(Anho)))
+PIB_2010_2024_Anual <- PIB_2010_2024_Anual %>%
+  mutate(Anho = lubridate::year(as.Date(Anho)))
+
+# Preparación de datos desestacionalizados (copiado de app.R)
+Mes_orden <- c(
+  "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
+)
+df_base <- expand.grid(
+  Anho = 2010:2024,
+  Mes  = factor(Mes_orden, levels = Mes_orden, ordered = TRUE)
+) |>
+  arrange(Anho, Mes)
+
+df_ipc <- Real_IPC_2010_2024_Mensual |> 
+  mutate(Mes = factor(Mes, levels = Mes_orden, ordered = TRUE)) |> 
+  arrange(Anho, Mes)
+ts_ipc <- ts(df_ipc$`Variación IPC`, start = c(2010, 1), frequency = 12)
+sa_ipc <- seasonal::final(seasonal::seas(ts_ipc)) |> as.numeric()
+
+df_desem <- Tasa_Desempleo_2010_2024_Mensual |> 
+  mutate(Mes = factor(Mes, levels = Mes_orden, ordered = TRUE)) |> 
+  arrange(Anho, Mes)
+ts_desem <- ts(df_desem$`1. Nacional`, start = c(2010, 3), frequency = 12)
+sa_desem <- seasonal::final(seasonal::seas(ts_desem)) |> as.numeric()
+df_desem_sa <- df_desem |> 
+  mutate(Desempleo = sa_desem) |> 
+  select(Anho, Mes, Desempleo)
+
+df_imacec <- IMACEC_2010_2024_Mensual |> 
+  mutate(Mes = factor(Mes, levels = Mes_orden, ordered = TRUE)) |> 
+  arrange(Anho, Mes)
+ts_imacec <- ts(df_imacec$`1. Imacec`, start = c(2010, 1), frequency = 12)
+sa_imacec <- seasonal::final(seasonal::seas(ts_imacec)) |> as.numeric()
+
+df_agreg <- Agregado_Monetario_2010_2024_Mensual |> 
+  mutate(Mes = factor(Mes, levels = Mes_orden, ordered = TRUE)) |> 
+  arrange(Anho, Mes)
+ts_m0 <- ts(df_agreg$M0, start = c(2010, 1), frequency = 12)
+ts_m1 <- ts(df_agreg$M1, start = c(2010, 1), frequency = 12)
+ts_m2 <- ts(df_agreg$M2, start = c(2010, 1), frequency = 12)
+ts_m3 <- ts(df_agreg$M3, start = c(2010, 1), frequency = 12)
+
+sa_m0 <- seasonal::final(seasonal::seas(ts_m0)) |> as.numeric()
+sa_m1 <- seasonal::final(seasonal::seas(ts_m1)) |> as.numeric()
+sa_m2 <- seasonal::final(seasonal::seas(ts_m2)) |> as.numeric()
+sa_m3 <- seasonal::final(seasonal::seas(ts_m3)) |> as.numeric()
+
+Desestacionalizados <- df_base |>
+  mutate(
+    IPC       = sa_ipc,
+    IMACEC    = sa_imacec,
+    M0        = sa_m0,
+    M1        = sa_m1,
+    M2        = sa_m2,
+    M3        = sa_m3
+  ) |>
+  left_join(df_desem_sa, by = c("Anho", "Mes"))
+
+# ---- Funciones auxiliares (copiado de app.R) --------------------------
+meses_es <- c("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+              "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
+
+nombre_largo <- function(x){
+  switch(x,
+         "IPC"               = "Variación mensual IPC (%)",
+         "Tasa de desempleo" = "Tasa de desempleo (%)",
+         "IMACEC"            = "Índice IMACEC",
+         "M0"                = "Agregado monetario M0",
+         "M1"                = "Agregado monetario M1",
+         "M2"                = "Agregado monetario M2",
+         "M3"                = "Agregado monetario M3")
+}
+
+mapa_dataset_rmd <- list(
+  "IPC"               = list(df = Real_IPC_2010_2024_Mensual,       col = "Variación IPC"),
+  "Tasa de desempleo" = list(df = Tasa_Desempleo_2010_2024_Mensual, col = "1. Nacional"),
+  "IMACEC"            = list(df = IMACEC_2010_2024_Mensual,         col = "1. Imacec"),
+  "M0"                = list(df = Agregado_Monetario_2010_2024_Mensual, col = "M0"),
+  "M1"                = list(df = Agregado_Monetario_2010_2024_Mensual, col = "M1"),
+  "M2"                = list(df = Agregado_Monetario_2010_2024_Mensual, col = "M2"),
+  "M3"                = list(df = Agregado_Monetario_2010_2024_Mensual, col = "M3")
+)
+
+# Datos reactivos adaptados para RMarkdown
+# Variación Dólar, IPC y TPM
+df_dolar_ipc_tpm_rmd <- USD_CLP_2010_2024_Mensual %>%
+  filter(Anho >= params$anho_rango_shiny[1],
+         Anho <= params$anho_rango_shiny[2]) %>%
+  arrange(Anho, Mes) %>%
+  mutate(Variacion_Dolar = (`Dólar` / lag(`Dólar`) - 1))
+
+df_ipc_rmd <- Real_IPC_2010_2024_Mensual %>%
+  filter(Anho >= params$anho_rango_shiny[1],
+         Anho <= params$anho_rango_shiny[2]) %>%
+  arrange(Anho, Mes)
+
+df_tpm_rmd <- Tasa_Interes_2010_2024_Mensual %>%
+  filter(Anho >= params$anho_rango_shiny[1],
+         Anho <= params$anho_rango_shiny[2]) %>% 
+  arrange(Anho, Mes) %>%
+  rename(TPM = `1. Tasa de política monetaria (TPM) (porcentaje)`)
+
+df_combined_resumen <- df_dolar_ipc_tpm_rmd %>%
+  select(Anho, Mes, Variacion_Dolar) %>%
+  inner_join(df_ipc_rmd %>% select(Anho, Mes, `Variación IPC`), by = c("Anho", "Mes")) %>%
+  inner_join(df_tpm_rmd %>% select(Anho, Mes, TPM), by = c("Anho", "Mes")) %>%
+  mutate(Fecha = as.Date(paste0(Anho, "-", match(Mes, meses_es), "-01")))
+
+# Datos de Migración y Desempleo
+df_resumen_migracion_rmd <- Resumen_Residencias_Definitivas_2010_2024 %>%
+  filter(Anho >= params$anho_rango_shiny[1],
+         Anho <= params$anho_rango_shiny[2])
+
+df_tasa_desempleo_anual_rmd <- Tasa_Desempleo_2010_2024_Mensual %>%
+  mutate(Anho = as.numeric(Anho)) %>%
+  group_by(Anho) %>%
+  summarise(Tasa_Desempleo_Prom = mean(`1. Nacional`, na.rm = TRUE)) %>%
+  filter(Anho >= params$anho_rango_shiny[1], Anho <= params$anho_rango_shiny[2])
+
+datos_apilados_rmd <- df_resumen_migracion_rmd %>%
+  select(Anho,
+         starts_with("ESTUDIOS_"),
+         starts_with("ACTIVIDAD_")) %>%
+  group_by(Anho) %>%
+  summarise(across(everything(), sum, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_longer(
+    cols = -Anho,
+    names_to = "categoria",
+    values_to = "personas"
+  ) %>%
+  mutate(categoria = sub("^(ESTUDIOS_|ACTIVIDAD_)", "", categoria))
+
+if (params$filtro_categoria_shiny == "Estudios") {
+  categorias_filtradas_rmd <- grep("^ESTUDIOS_", names(df_resumen_migracion_rmd), value = TRUE) %>%
+    sub("^ESTUDIOS_", "", .)
+} else {
+  categorias_filtradas_rmd <- grep("^ACTIVIDAD_", names(df_resumen_migracion_rmd), value = TRUE) %>%
+    sub("^ACTIVIDAD_", "", .)
+}
+
+datos_apilados_rmd <- datos_apilados_rmd %>%
+  filter(categoria %in% categorias_filtradas_rmd) %>%
+  left_join(df_tasa_desempleo_anual_rmd, by = "Anho")
+
+# Datos Macroeconómicos Normalizados
+Reactive_Macro_Datos_Normalizado_rmd <- (function() {
+  # 1) IMACEC → variación interanual a partir de promedio anual
+  imacec <- IMACEC_2010_2024_Mensual %>%
+    group_by(Anho) %>%
+    summarise(IMACEC = mean(`1. Imacec`, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      Fecha = as.Date(sprintf("%d-01-01", Anho)),
+      IMACEC = (IMACEC / lag(IMACEC) - 1) * 100
+    ) %>%
+    filter(!is.na(IMACEC)) %>%
+    select(Anho, Fecha, IMACEC) # Aseguramos que Anho se mantenga
+
+  # 2) PIB anual → variación % interanual
+  pib <- PIB_2010_2024_Anual %>%
+    filter(Anho >= params$anho_rango_shiny[1], Anho <= params$anho_rango_shiny[2]) %>%
+    mutate(
+      Fecha = as.Date(sprintf("%d-01-01", Anho)),
+      PIB   = (`1. PIB a precios corrientes` / lag(`1. PIB a precios corrientes`) - 1) * 100
+    ) %>%
+    select(Anho, Fecha, PIB) %>% # Aseguramos que Anho se mantenga
+    filter(!is.na(PIB))
+
+  # 3) TPM → variación interanual a partir del promedio anual
+  tpm <- Tasa_Interes_2010_2024_Mensual %>%
+    group_by(Anho) %>%
+    summarise(TPM = mean(`1. Tasa de política monetaria (TPM) (porcentaje)`, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      Fecha = as.Date(sprintf("%d-01-01", Anho)),
+      TPM = (TPM / lag(TPM) - 1) * 100
+    ) %>%
+    filter(!is.na(TPM)) %>%
+    select(Anho, Fecha, TPM) # Aseguramos que Anho se mantenga
+
+  # 4) Expectativa IPC → variación interanual del promedio
+  expect_ipc <- Expectativa_IPC_2010_2024_Mensual %>%
+    group_by(Anho) %>%
+    summarise(Expectativa_IPC = mean(Expectativa, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      Fecha = as.Date(sprintf("%d-01-01", Anho)),
+      Expectativa_IPC = (Expectativa_IPC / lag(Expectativa_IPC) - 1) * 100
+    ) %>%
+    filter(!is.na(Expectativa_IPC)) %>%
+    select(Anho, Fecha, Expectativa_IPC) # Aseguramos que Anho se mantenga
+
+  # 5) Real IPC → ya es variación mensual, pero lo promediamos anual
+  real_ipc <- Real_IPC_2010_2024_Mensual %>%
+    group_by(Anho) %>%
+    summarise(Real_IPC = mean(`Variación IPC`, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      Fecha = as.Date(sprintf("%d-01-01", Anho)),
+      Real_IPC = (Real_IPC / lag(Real_IPC) - 1) * 100
+    ) %>%
+    filter(!is.na(Real_IPC)) %>%
+    select(Anho, Fecha, Real_IPC) # Aseguramos que Anho se mantenga
+
+  # 6) M0
+  M0 <- Agregado_Monetario_2010_2024_Mensual %>%
+    group_by(Anho) %>%
+    summarise(M0 = mean(M0, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      Fecha = as.Date(sprintf("%d-01-01", Anho)),
+      M0 = (M0 / lag(M0) - 1) * 100
+    ) %>%
+    filter(!is.na(M0)) %>%
+    select(Anho, Fecha, M0) # Aseguramos que Anho se mantenga
+
+  # 7) M1
+  M1 <- Agregado_Monetario_2010_2024_Mensual %>%
+    group_by(Anho) %>%
+    summarise(M1 = mean(M1, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      Fecha = as.Date(sprintf("%d-01-01", Anho)),
+      M1 = (M1 / lag(M1) - 1) * 100
+    ) %>%
+    filter(!is.na(M1)) %>%
+    select(Anho, Fecha, M1) # Aseguramos que Anho se mantenga
+
+  # 8) M2
+  M2 <- Agregado_Monetario_2010_2024_Mensual %>%
+    group_by(Anho) %>%
+    summarise(M2 = mean(M2, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      Fecha = as.Date(sprintf("%d-01-01", Anho)),
+      M2 = (M2 / lag(M2) - 1) * 100
+    ) %>%
+    filter(!is.na(M2)) %>%
+    select(Anho, Fecha, M2) # Aseguramos que Anho se mantenga
+
+  # Unión de todos los dataframes por Fecha y Anho
+  df <- imacec %>%
+    inner_join(pib,         by = c("Fecha", "Anho")) %>%
+    inner_join(tpm,         by = c("Fecha", "Anho")) %>%
+    inner_join(expect_ipc,  by = c("Fecha", "Anho")) %>%
+    inner_join(real_ipc,    by = c("Fecha", "Anho")) %>%
+    inner_join(M0,          by = c("Fecha", "Anho")) %>%
+    inner_join(M1,          by = c("Fecha", "Anho")) %>%
+    inner_join(M2,          by = c("Fecha", "Anho"))
+
+  df %>%
+    mutate(across(
+      .cols = -c(Fecha, Anho), # Excluimos Fecha y Anho de la normalización
+      .fns  = ~ {
+        min_val <- min(., na.rm = TRUE)
+        max_val <- max(., na.rm = TRUE)
+        if (max_val == min_val) {
+          rep(0, length(.))
+        } else {
+          2 * ((. - min_val) / (max_val - min_val)) - 1
+        }
+      }
+    ))
+})()
+
+# Datos Finanzas Públicas
+df_ingreso_gasto_rmd <- Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual %>%
+  filter(Anho >= params$anho_rango_shiny[1],
+         Anho <= params$anho_rango_shiny[2])
+
+df_tpm_dinamico_rmd <- Tasa_Interes_2010_2024_Mensual %>%
+  rename(TPM = `1. Tasa de política monetaria (TPM) (porcentaje)`) %>%
+  filter(Anho >= params$anho_rango_shiny[1],
+         Anho <= params$anho_rango_shiny[2]) %>% 
+  mutate(Fecha = as.Date(paste0(Anho, "-", match(Mes, meses_es), "-01")))
+
+# Datos Mercado Laboral y Demografía
+df_desempleo_anual_rmd <- Tasa_Desempleo_2010_2024_Mensual %>%
+  filter(Anho >= params$anho_rango_shiny[1], Anho <= params$anho_rango_shiny[2]) %>%
+  group_by(Anho) %>%
+  summarise(Tasa_Prom_Anual = mean(`1. Nacional`, na.rm = TRUE), .groups = 'drop')
+
+df_resumen_migracion_anual_rmd <- Resumen_Residencias_Definitivas_2010_2024 %>%
+  filter(Anho >= params$anho_rango_shiny[1], Anho <= params$anho_rango_shiny[2]) %>%
+  group_by(Anho) %>%
+  summarise(
+    total_personas = sum(total_personas, na.rm = TRUE),
+    hombres = sum(hombres, na.rm = TRUE),
+    mujeres = sum(mujeres, na.rm = TRUE),
+    across(starts_with("ESTUDIOS_"), sum, na.rm = TRUE),
+    across(starts_with("ACTIVIDAD_"), sum, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Datos Sector Externo
+df_usd_clp_anual_rmd <- USD_CLP_2010_2024_Mensual %>%
+  filter(Anho >= params$anho_rango_shiny[1],
+         Anho <= params$anho_rango_shiny[2]) %>%
+  group_by(Anho) %>%
+  summarise(Dolar_Promedio = mean(`Dólar`, na.rm = TRUE))
+
+df_cobre_rmd <- Ingreso_Gasto_Gobierno_Exportacion_Cobre_2010_2024_Anual %>%
+  filter(Anho >= params$anho_rango_shiny[1],
+         Anho <= params$anho_rango_shiny[2])
+
+# Panel Avanzado (Desestacionalizar)
+Reactive_Serie_rmd <- (function() {
+  serie <- params$serie_elegida_shiny
+  anho_min <- params$anho_rango_shiny[1]
+  anho_max <- params$anho_rango_shiny[2]
+  
+  lista <- list()
+  
+  if ("orig" %in% params$tipo_serie_shiny){
+    info <- mapa_dataset_rmd[[serie]]
+    df_o <- info$df %>%
+      mutate(Mes = factor(Mes, levels = Mes_orden, ordered = TRUE)) %>%
+      arrange(Anho, Mes) %>%
+      filter(Anho >= anho_min, Anho <= anho_max) %>%
+      transmute(
+        Anho, Mes,
+        Valor = .data[[info$col]],
+        Tipo  = "Original"
+      )
+    lista[[length(lista)+1]] <- df_o
+  }
+  
+  if ("sa" %in% params$tipo_serie_shiny){
+    col_sa <- switch(serie,
+                     "IPC"               = "IPC",
+                     "Tasa de desempleo" = "Desempleo",
+                     "IMACEC"            = "IMACEC",
+                     "M0"                = "M0",
+                     "M1"                = "M1",
+                     "M2"                = "M2",
+                     "M3"                = "M3")
+    df_sa <- Desestacionalizados %>%
+      mutate(Mes = factor(Mes, levels = Mes_orden, ordered = TRUE)) %>%
+      filter(Anho >= anho_min, Anho <= anho_max) %>%
+      transmute(
+        Anho, Mes,
+        Valor = .data[[col_sa]],
+        Tipo  = "Desestacionalizada"
+      )
+    lista[[length(lista)+1]] <- df_sa
+  }
+  
+  if(length(lista) == 0) return(NULL) # Manejar caso sin selección
+  bind_rows(lista)
+})()
+
+Reactive_STL_rmd <- (function() {
+  if (!("orig" %in% params$tipo_serie_shiny)) {
+    return(NULL)
+  }
+  
+  serie <- params$serie_elegida_shiny
+  info  <- mapa_dataset_rmd[[serie]]
+  
+  df_o <- info$df %>%
+    mutate(Mes = factor(Mes, levels = Mes_orden, ordered = TRUE)) %>%
+    arrange(Anho, Mes) %>%
+    filter(
+      Anho >= params$anho_rango_shiny[1],
+      Anho <= params$anho_rango_shiny[2]
+    )
+  
+  if (nrow(df_o) < 24) {
+    return(NULL)
+  }
+  
+  ts_orig <- ts(
+    df_o[[info$col]],
+    start     = c(df_o$Anho[1],
+                  match(as.character(df_o$Mes[1]), Mes_orden)),
+    frequency = 12
+  )
+  
+  stl(ts_orig, s.window = "periodic")
+})()
+
+# Función para análisis de series de tiempo
+analyze_series <- function(data_frame, value_col_name, serie_name, unit = "", anho_min, anho_max) {
+  # Aseguramos que Anho exista para el filtrado, o extraemos de Fecha si solo existe Fecha
+  if (!"Anho" %in% names(data_frame) && "Fecha" %in% names(data_frame)) {
+    data_frame <- data_frame %>% mutate(Anho = year(Fecha))
+  }
+
+  df_filtered <- data_frame %>%
+    filter(Anho >= anho_min, Anho <= anho_max)
+  
+  if ("Mes" %in% names(df_filtered)) {
+    df_filtered <- df_filtered %>%
+      mutate(Fecha = as.Date(paste0(Anho, "-", match(Mes, meses_es), "-01"))) %>%
+      arrange(Fecha)
+  } else {
+    df_filtered <- df_filtered %>%
+      arrange(Anho) %>%
+      # Si no hay Mes, asumimos que Fecha ya representa el año completo o es suficiente
+      # Aquí es donde se debería asegurar que Fecha ya está presente o se crea adecuadamente
+      # para dataframes que originalmente solo tienen Anho (como PIB_2010_2024_Anual)
+      # Para los dataframes anuales, la columna Fecha ya se ha creado en la preparación de datos.
+      # Para los dataframes que no tienen Mes ni Fecha (pero sí Anho) como PIB_2010_2024_Anual,
+      # la Fecha ya se ha generado como el primer día del año en la sección Reactive_Macro_Datos_Normalizado_rmd
+      # o en la carga inicial de datos anuales.
+      # No necesitamos crear 'Fecha' aquí si ya se ha manejado en las preparaciones anteriores.
+      identity() 
+  }
+
+  min_val <- min(df_filtered[[value_col_name]], na.rm = TRUE)
+  max_val <- max(df_filtered[[value_col_name]], na.rm = TRUE)
+  
+  # Si Fecha no existe en df_filtered, generarla para la interpretación
+  if (!"Fecha" %in% names(df_filtered)) {
+    # Esto manejaría casos donde el dataframe es anual y no tiene una columna 'Fecha' directa
+    # Asumimos que para estos casos, `Anho` es suficiente para identificar el tiempo
+    # y creamos una Fecha proxy para el formato de impresión.
+    df_filtered <- df_filtered %>%
+      mutate(Fecha = as.Date(paste0(Anho, "-01-01")))
+  }
+
+  # Encuentra la fecha del mínimo y máximo
+  min_date <- df_filtered$Fecha[which.min(df_filtered[[value_col_name]])]
+  max_date <- df_filtered$Fecha[which.max(df_filtered[[value_col_name]])]
+  
+  cat(paste0("Para la serie de '", serie_name, "' en el rango de ", anho_min, " a ", anho_max, ":\n\n"))
+  cat(paste0("- El valor mínimo observado fue **", round(min_val, 2), unit, "**, ocurrido en ", format(min_date, "%B de %Y"), ".\n"))
+  cat(paste0("- El valor máximo observado fue **", round(max_val, 2), unit, "**, ocurrido en ", format(max_date, "%B de %Y"), ".\n\n"))
+  
+  # Interpretaciones específicas según la serie
+  if (serie_name == "Variación % Dólar") {
+    cat("Esta serie muestra la volatilidad del tipo de cambio peso-dólar. Fluctuaciones significativas pueden impactar en el comercio exterior y la inflación importada. Un aumento representa una depreciación del peso chileno frente al dólar.\n\n")
+  } else if (serie_name == "Variación % IPC") {
+    cat("La variación porcentual del Índice de Precios al Consumidor (IPC) mide la inflación. Un IPC alto indica una pérdida de poder adquisitivo de la moneda. Es un indicador clave para la política monetaria.\n\n")
+  } else if (serie_name == "TPM (%)") {
+    cat("La Tasa de Política Monetaria (TPM) es el principal instrumento del Banco Central para influir en la inflación. Aumentos en la TPM buscan desacelerar la economía y controlar la inflación, mientras que reducciones la estimulan. Observar su comportamiento es crucial para entender la dirección de la política monetaria.\n\n")
+  } else if (serie_name == "Personas Migrantes vs. Tasa de Desempleo") {
+    cat("Este gráfico explora la relación entre la migración y la tasa de desempleo. Podría revelar si los flujos migratorios coinciden con periodos de alta o baja disponibilidad de empleo, o si ciertas categorías de migrantes (por estudios o actividad) se asocian a patrones específicos de empleo.\n\n")
+  } else if (serie_name == "IMACEC") {
+    cat("El Índice Mensual de Actividad Económica (IMACEC) es un buen proxy del PIB y refleja la actividad económica mensual. Su tendencia permite inferir el ritmo de crecimiento o contracción de la economía chilena. Un IMACEC positivo y creciente indica expansión económica.\n\n")
+  } else if (serie_name == "PIB") {
+    cat("El Producto Interno Bruto (PIB) es el indicador fundamental del tamaño de una economía. La variación interanual del PIB nos muestra el crecimiento económico. Un crecimiento sostenido del PIB es deseable para el desarrollo económico y la mejora del bienestar.\n\n")
+  } else if (serie_name == "Exportación Cobre Bruto") {
+    cat("Las exportaciones de cobre bruto son cruciales para la economía chilena, dado que Chile es el mayor productor mundial de cobre. Los precios internacionales del cobre y el volumen de exportación tienen un impacto directo en los ingresos fiscales y el tipo de cambio. El análisis de esta serie es clave para entender la dependencia económica del cobre.\n\n")
+  } else if (serie_name == "Dólar Promedio Anual") {
+    cat("El valor promedio anual del dólar (USD/CLP) influye en la competitividad de las exportaciones e importaciones, y en el costo de la vida a través de los bienes importados. Una tendencia al alza del dólar puede encarecer las importaciones y beneficiar a los exportadores. La estabilidad en el tipo de cambio es generalmente preferida para la planificación económica.\n\n")
+  } else if (serie_name == "Tasa de Desempleo") {
+    cat("La tasa de desempleo es un indicador clave del mercado laboral. Un aumento en la tasa de desempleo sugiere una desaceleración económica, mientras que una disminución indica una mejora. Es importante considerar factores como la estacionalidad y los efectos cíclicos al analizar esta serie.\n\n")
+  } else if (serie_name == "Ingreso y Gasto Total del Gobierno") {
+    cat("Los ingresos y gastos del gobierno reflejan la política fiscal. La diferencia entre ambos indica el balance fiscal (superávit o déficit). Un déficit sostenido puede llevar a un aumento de la deuda pública. Es fundamental para la sostenibilidad fiscal del país.\n\n")
+  } else if (serie_name == "Serie Original vs. Desestacionalizada") {
+    cat("La comparación entre la serie original y la desestacionalizada permite identificar el componente cíclico y de tendencia, eliminando la influencia de patrones estacionales predecibles. Esto es crucial para entender la verdadera dinámica subyacente del indicador.\n\n")
+  } else if (serie_name == "Descomposición STL") {
+    cat("La descomposición STL (Seasonal-Trend decomposition using Loess) divide una serie de tiempo en sus componentes de tendencia, estacionalidad y residuo. Permite un análisis más profundo de los patrones de la serie, facilitando la identificación de cambios estructurales o eventos inusuales.\n\n")
+  }
+  cat("---") # Separador visual
+  cat("\n\n")
+}
+```
+
+Este informe presenta un análisis de diversos indicadores macroeconómicos de Chile, utilizando los parámetros de fecha y selección de gráficos especificados por el usuario en la aplicación Shiny.
+
+**Rango de Años Seleccionado:** `r params$anho_rango_shiny[1]` a `r params$anho_rango_shiny[2]`
+
+# Resumen de Indicadores Clave
+
+## Gráfico de Comparación Mensual: Variación % del Dólar vs. Variación % del IPC vs. TPM
+
+```{r grafico_resumen_dolar_ipc_tpm}
+plot_ly(df_combined_resumen, x = ~Fecha) %>%
+  add_lines(y = ~Variacion_Dolar * 100, name = "Variación % Dólar", line = list(color = 'blue')) %>%
+  add_lines(y = ~`Variación IPC`, name = "Variación % IPC", line = list(color = 'red')) %>%
+  add_lines(y = ~TPM, name = "TPM (%)", line = list(color = 'green')) %>%
+  layout(
+    title = "Comparación Mensual: Variación % del Dólar vs. Variación % del IPC vs. TPM",
+    xaxis = list(title = "Fecha"),
+    yaxis = list(title = "Porcentaje (%)"),
+    legend = list(x = 0.05, y = 0.95)
+  )
+```
+
+
+
+```{r interpretacion_dolar_ipc_tpm_resumen, results='asis'}
+analyze_series(df_combined_resumen, "Variacion_Dolar", "Variación % Dólar", unit = "%", 
+               params$anho_rango_shiny[1], params$anho_rango_shiny[2])
+analyze_series(df_combined_resumen, "Variación IPC", "Variación % IPC", unit = "%", 
+               params$anho_rango_shiny[1], params$anho_rango_shiny[2])
+analyze_series(df_combined_resumen, "TPM", "TPM (%)", unit = "%", 
+               params$anho_rango_shiny[1], params$anho_rango_shiny[2])
+```
+
+## Gráfico de Relación entre la Actividad y Estudios de Migrantes y la Tasa de Desempleo
+
+```{r grafico_apilado_rmd}
+data_plot <- datos_apilados_rmd
+
+data_totals <- data_plot %>%
+  group_by(Anho) %>%
+  summarise(Total_Personas = sum(personas, na.rm = TRUE),
+            Tasa_Desempleo_Prom = first(Tasa_Desempleo_Prom)) %>%
+  ungroup()
+
+p <- plot_ly(data_plot,
+             x = ~Anho,
+             y = ~personas,
+             color = ~categoria,
+             type = 'bar',
+             text = ~paste0("Año: ", Anho, "<br>",
+                            "Categoría: ", categoria, "<br>",
+                            "Personas: ", personas, "<br>",
+                            "Tasa Desempleo: ", round(Tasa_Desempleo_Prom, 2), "%"),
+             hoverinfo = "text") %>%
+  layout(
+    barmode = "stack",
+    title = list(text = paste("Distribución por", params$filtro_categoria_shiny), y = 0.95),
+    xaxis = list(title = "Año", tickmode = "linear", dtick = 1),
+    yaxis = list(title = "Total de Personas"),
+    legend = list(orientation = "h", x = 0.1, y = -0.3,
+                  font = list(size = 10)),
+    margin = list(b = 100)
+  )
+
+p %>%
+  add_annotations(
+    data = data_totals,
+    x = ~Anho,
+    y = ~Total_Personas,
+    text = ~paste0(round(Tasa_Desempleo_Prom, 1), "%"),
+    xanchor = 'center',
+    yanchor = 'bottom',
+    showarrow = FALSE,
+    textangle = 0,
+    font = list(size = 10, color = 'black'),
+    yshift = 10
+  )
+```
+
+
+
+```{r interpretacion_migracion_desempleo_resumen, results='asis'}
+analyze_series(datos_apilados_rmd, "personas", "Personas Migrantes vs. Tasa de Desempleo", 
+               anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+```
+
+# Indicadores Macroeconómicos
+
+## Serie de Tiempo Comparativa para Índices Macroeconómicos
+
+```{r grafico_macro_comparativo_rmd}
+label_map_rmd <- list(
+  IMACEC            = "IMACEC",
+  PIB               = "PIB",
+  TPM               = "TPM",
+  Expectativa_IPC   = "Variación IPC Expectativa",
+  Real_IPC          = "Variación IPC real",
+  M0 = "Agregado monetario M0",
+  M1 = "Agregado monetario M1",
+  M2 = "Agregado monetario M2"
+)
+
+p <- plot_ly()
+
+p <- p %>%
+  add_lines(
+    data = Reactive_Macro_Datos_Normalizado_rmd,
+    x    = ~Fecha,
+    y    = as.formula(paste0("~", params$x_var_shiny)),
+    name = label_map_rmd[[params$x_var_shiny]],
+    line = list(width = 2, color = "gray")
+  )
+
+p <- p %>%
+  add_lines(
+    data = Reactive_Macro_Datos_Normalizado_rmd,
+    x    = ~Fecha,
+    y    = as.formula(paste0("~", params$y_var_shiny)),
+    name = label_map_rmd[[params$y_var_shiny]],
+    line = list(width = 2, dash = "dash", color = "black")
+  )
+
+p %>%
+  layout(
+    title      = paste0(label_map_rmd[[params$y_var_shiny]], " vs. ", label_map_rmd[[params$x_var_shiny]]),
+    xaxis      = list(title = "Fecha", tickangle = -45),
+    yaxis      = list(
+      title     = "Valor normalizado [-1, 1]",
+      zeroline  = FALSE,
+      range     = c(-1, 1),
+      standoff  = 20
+    ),
+    showlegend = TRUE,
+    margin     = list(l = 80, r = 80, t = 80, b = 80),
+    hovermode  = "x unified"
+  )
+```
+
+
+
+```{r interpretacion_macro_comparativo, results='asis'}
+analyze_series(Reactive_Macro_Datos_Normalizado_rmd, params$x_var_shiny, label_map_rmd[[params$x_var_shiny]], 
+               anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+analyze_series(Reactive_Macro_Datos_Normalizado_rmd, params$y_var_shiny, label_map_rmd[[params$y_var_shiny]], 
+               anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+```
+
+# Finanzas Públicas
+
+## Ingreso y Gasto Total del Gobierno por Año
+
+```{r grafico_endeudamiento_rmd}
+df2_rmd <- df_ingreso_gasto_rmd %>%
+  mutate(
+    Ingresos = `5. Total ingresos`,
+    Gastos = -`6. Total gastos`,
+    Endeudamiento_R = round(`7. Préstamo o endeudamiento neto`, 0),
+    y_text = if_else(
+      Endeudamiento_R >= 0,
+      Ingresos + abs(Ingresos) * 0.20,
+      Gastos - abs(Gastos) * 0.20
+    ),
+    text_color = if_else(Endeudamiento_R >= 0, 'green', 'red')
+  )
+
+p <- plot_ly(df2_rmd, x = ~Anho) %>%
+  add_bars(
+    y = ~Ingresos,
+    name = "Ingresos",
+    marker = list(color = 'green')
+  ) %>%
+  add_bars(
+    y = ~Gastos,
+    name = "Gastos",
+    marker = list(color = 'red')
+  )
+
+p %>% add_trace(
+  data = df2_rmd,
+  x = ~Anho,
+  y = ~y_text,
+  type = 'scatter',
+  mode = 'text',
+  text = ~Endeudamiento_R,
+  textposition = 'top center',
+  textfont = list(color = ~text_color),
+  showlegend = FALSE
+) %>%
+  layout(
+    title = "Ingreso y Gasto Total del Gobierno por Año",
+    xaxis = list(title = "Año"),
+    yaxis = list(title = "Monto en Millones (CLP)"),
+    barmode = 'relative',
+    bargap = 0.2,
+    legend = list(x = 0.1, y = 0.9)
+  )
+```
+
+
+```{r interpretacion_endeudamiento, results='asis'}
+analyze_series(df_ingreso_gasto_rmd, "5. Total ingresos", "Ingreso y Gasto Total del Gobierno", unit = " millones de CLP",
+               anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+```
+
+## Análisis Mensual y Anual del TPM
+
+```{r plot_tpm_dinamico_rmd}
+df_tpm_plot_rmd <- df_tpm_dinamico_rmd
+
+if (params$tipo_visual_tpm_shiny == "Boxplot") {
+  plot_ly(
+    data = df_tpm_plot_rmd,
+    x = ~as.factor(Anho),
+    y = ~TPM,
+    type = "box",
+    boxpoints = "outliers",
+    name = "TPM por Año",
+    marker = list(color = 'rgba(7, 164, 181, 0.6)'),
+    line = list(color = 'rgba(7, 164, 181, 1)')
+  ) %>%
+    layout(
+      title = "Boxplot para el TPM (%) Anual",
+      xaxis = list(title = "Año"),
+      yaxis = list(title = "TPM (%)")
+    )
+} else {
+  plot_ly(
+    data = df_tpm_plot_rmd,
+    x = ~Fecha,
+    y = ~TPM,
+    type = "scatter",
+    mode = "lines+markers",
+    name = "TPM mensual",
+    line = list(color = 'rgba(200, 30, 30, 0.8)', width = 2),
+    marker = list(size = 4)
+  ) %>%
+    layout(
+      title = "Serie de Tiempo Mensual de la TPM",
+      xaxis = list(title = "Año"),
+      yaxis = list(title = "TPM (%)")
+    )
+}
+```
+
+
+
+```{r interpretacion_tpm, results='asis'}
+analyze_series(df_tpm_dinamico_rmd, "TPM", "TPM (%)", unit = "%",
+               anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+```
+
+# Mercado Laboral y Demografía
+
+## Tasa de Desempleo Promedio Anual
+
+```{r plot_desempleo_rmd}
+df_des_rmd <- df_desempleo_anual_rmd
+p <- plot_ly(
+  df_des_rmd, x = ~Anho, y = ~Tasa_Prom_Anual,
+  type = 'scatter', mode = 'lines+markers',
+  line = list(color = 'blue'), marker = list(size = 8),
+  name = 'Tasa Anual'
+)
+
+if (params$ver_migracion_shiny == "Total") {
+  df_ann <- df_resumen_migracion_anual_rmd %>%
+    select(Anho, label = total_personas) %>%
+    left_join(df_des_rmd, by = 'Anho')
+  p <- p %>% add_text(
+    data = df_ann,
+    x = ~Anho, y = ~Tasa_Prom_Anual,
+    text = ~label,
+    textposition = 'top center',
+    textfont = list(color = 'darkorange', size = 12),
+    textoffset = 10,
+    showlegend = FALSE
+  )
+} else if (params$ver_migracion_shiny %in% c("Sexo", "Estudios", "Actividad")) {
+  df_mig0 <- df_resumen_migracion_anual_rmd
+  sel_cols <- switch(
+    params$ver_migracion_shiny,
+    "Sexo" = c("hombres", "mujeres"),
+    "Estudios" = grep("^ESTUDIOS_", names(df_mig0), value = TRUE),
+    "Actividad" = grep("^ACTIVIDAD_", names(df_mig0), value = TRUE)
+  )
+  df_ann <- df_mig0 %>%
+    pivot_longer(cols = all_of(sel_cols), names_to = 'categoria', values_to = 'valor') %>%
+    mutate(
+      pct = valor / total_personas * 100,
+      categoria = case_when(
+        str_starts(categoria, "ESTUDIOS_") ~ str_remove(categoria, "^ESTUDIOS_"),
+        str_starts(categoria, "ACTIVIDAD_") ~ str_remove(categoria, "^ACTIVIDAD_"),
+        TRUE ~ categoria
+      )
+    ) %>%
+    group_by(Anho) %>%
+    slice_max(pct, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    left_join(df_des_rmd, by = 'Anho')
+  p <- p %>% add_text(
+    data = df_ann,
+    x = ~Anho, y = ~Tasa_Prom_Anual,
+    text = ~paste0("", round(pct,1), "%
+  ", categoria, "
+                   "),
+    textposition = 'top center',
+    textfont = list(color = 'darkgreen', size = 12),
+    textoffset = 10,
+    showlegend = FALSE
+  )
+}
+
+p %>% layout(
+  title = 'Tasa de Desempleo Promedio Anual',
+  xaxis = list(title = 'Año'),
+  yaxis = list(title = 'Tasa (%)', range = c(5.5, 12)),
+  hovermode = 'x unified',
+  legend = list(x = 0.1, y = 0.9)
+)
+```
+
+
+
+```{r interpretacion_desempleo, results='asis'}
+analyze_series(df_desempleo_anual_rmd, "Tasa_Prom_Anual", "Tasa de Desempleo", unit = "%",
+               anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+```
+
+# Sector Externo
+
+## Exportaciones y Tipo de Cambio
+
+```{r plot_sector_externo_rmd}
+if ("cobre" %in% params$graficos_sector_externo_shiny) {
+  p_cobre <- plot_ly(
+    data = df_cobre_rmd,
+    x = ~Anho,
+    y = ~`1.2. Cobre bruto`,
+    type = 'scatter',
+    mode = 'lines+markers',
+    line = list(color = 'orange'),
+    marker = list(size = 6),
+    name = "Cobre bruto"
+  ) %>%
+    layout(
+      title = "Serie de Tiempo para las Exportaciones de Cobre Bruto",
+      xaxis = list(title = "Año"),
+      yaxis = list(title = "Monto en Millones (CLP)", tickformat = ".2f"),
+      hovermode = "x unified"
+    )
+  print(p_cobre)
+  cat("\n")
+  analyze_series(df_cobre_rmd, "1.2. Cobre bruto", "Exportación Cobre Bruto", unit = " millones de CLP",
+                 anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+}
+
+if ("dolar" %in% params$graficos_sector_externo_shiny) {
+  p_dolar <- plot_ly(
+    data = df_usd_clp_anual_rmd,
+    x = ~Anho,
+    y = ~Dolar_Promedio,
+    type = 'scatter',
+    mode = 'lines+markers',
+    line = list(color = 'blue'),
+    marker = list(size = 6),
+    name = "Dólar Promedio"
+  ) %>%
+    layout(
+      title = "Serie de Tiempo para el Promedio Anual del Dólar",
+      xaxis = list(title = "Año"),
+      yaxis = list(title = "CLP", tickformat = ".2f"),
+      hovermode = "x unified"
+    )
+  print(p_dolar)
+  cat("\n")
+  analyze_series(df_usd_clp_anual_rmd, "Dolar_Promedio", "Dólar Promedio Anual", unit = " CLP/USD",
+                 anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+}
+```
+
+# Análisis Avanzado (Desestacionalización)
+
+## Gráfico de Serie Original vs. Desestacionalizada
+
+```{r plot_sa_vs_orig_rmd}
+datos_sa_rmd <- Reactive_Serie_rmd
+
+if (!is.null(datos_sa_rmd) && nrow(datos_sa_rmd) > 0) {
+  datos_sa_rmd <- datos_sa_rmd %>%
+    arrange(Anho, Mes) %>%
+    mutate(Time = interaction(Anho, Mes, lex.order = TRUE))
+  
+  plot_ly(data = datos_sa_rmd,
+          x     = ~Time,
+          y     = ~Valor,
+          color = ~Tipo,
+          colors = c("Original" = "#4E79A7", "Desestacionalizada" = "#E15759"),
+          type  = "scatter",
+          mode  = "lines") |>
+    layout(
+      title  = paste("Serie:", params$serie_elegida_shiny),
+      xaxis  = list(title = "Año-Mes",
+                    tickangle = -45,
+                    tickmode  = "array",
+                    tickvals  = datos_sa_rmd$Time[seq(1, nrow(datos_sa_rmd), 12)],
+                    ticktext  = datos_sa_rmd$Anho[seq(1, nrow(datos_sa_rmd), 12)]),
+      yaxis  = list(title = nombre_largo(params$serie_elegida_shiny)),
+      legend = list(orientation = "h", x = 0.1, y = -0.25)
+    ) |>
+    config(displayModeBar = FALSE)
+} else {
+  cat("No se seleccionó ninguna serie o no hay datos para el rango de años y tipo de serie elegidos.")
+}
+```
+
+
+
+```{r interpretacion_serie_avanzada, results='asis'}
+if (!is.null(Reactive_Serie_rmd) && nrow(Reactive_Serie_rmd) > 0) {
+  analyze_series(Reactive_Serie_rmd, "Valor", "Serie Original vs. Desestacionalizada", 
+                 anho_min = params$anho_rango_shiny[1], anho_max = params$anho_rango_shiny[2])
+}
+```
+
+## Descomposición STL
+
+```{r plot_stl_rmd}
+descomp_rmd <- Reactive_STL_rmd
+
+if (!is.null(descomp_rmd)) {
+  p <- forecast::autoplot(descomp_rmd) +
+    labs(title = paste("Descomposición STL –", params$serie_elegida_shiny),
+         x = "Tiempo", y = "")
+  
+  ggplotly(p) |> config(displayModeBar = FALSE)
+} else {
+  cat("La descomposición STL requiere la serie original y al menos 24 observaciones. Asegúrese de que 'Serie original' esté seleccionada y el rango de años sea suficiente.")
+}
+```
+
+```{r interpretacion_stl, results='asis'}
+if (!is.null(Reactive_STL_rmd)) {
+  # Para la interpretación de STL, no se busca min/max de la serie original, sino una descripción general
+  cat(paste0("La descomposición STL para la serie de '", params$serie_elegida_shiny, "' en el rango de ", params$anho_rango_shiny[1], " a ", params$anho_rango_shiny[2], " revela los siguientes componentes:\n\n"))
+  cat("- **Tendencia:** Muestra la dirección a largo plazo de la serie, suavizando las fluctuaciones a corto plazo.\n")
+  cat("- **Estacionalidad:** Captura los patrones que se repiten en intervalos regulares (por ejemplo, anuales o mensuales).\n")
+  cat("- **Residual:** Representa el ruido o las fluctuaciones irregulares que no pueden ser explicadas por la tendencia o la estacionalidad.\n\n")
+  cat("Esta descomposición es fundamental para comprender mejor el comportamiento de la serie y para la construcción de modelos predictivos más precisos.\n\n")
+  cat("---")
+  cat("\n\n")
+}
+```
+
+
+# Librerias y funciones utilizadas en el dashboard
+
+Este documento detalla las librerías cargadas, así como las funciones clave utilizadas de cada una de ellas, junto con una breve descripción de su uso en el dashboard.
+
+| Librería           | Función             | Explicación                                                                                                                                                                                                                                                                                                                        |
+| :----------------- | :------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shiny`            | `shinyApp()`        | Función principal para construir y ejecutar una aplicación Shiny, combinando la interfaz de usuario (UI) y la lógica del servidor.                                                                                                                                                                                                  |
+|                    | `fluidPage()`       | Crea un diseño de página que se ajusta automáticamente al ancho de la ventana del navegador, ideal para diseños responsivos.                                                                                                                                                                                                          |
+|                    | `sidebarLayout()`   | Organiza el contenido en un diseño de dos columnas: una barra lateral y un panel principal.                                                                                                                                                                                                                                       |
+|                    | `sidebarPanel()`    | Contenedor para los elementos de la interfaz de usuario que se desean colocar en la barra lateral (ej. filtros, botones).                                                                                                                                                                                                            |
+|                    | `mainPanel()`       | Contenedor para los elementos de salida principales de la aplicación (ej. gráficos, tablas).                                                                                                                                                                                                                                        |
+|                    | `selectInput()`     | Crea un widget de selección con opciones desplegables, permitiendo al usuario elegir una o varias de una lista.                                                                                                                                                                                                                     |
+|                    | `sliderInput()`     | Crea un widget deslizante para que el usuario seleccione un valor o un rango de valores.                                                                                                                                                                                                                                            |
+|                    | `plotOutput()`      | Un espacio reservado en la interfaz de usuario donde se renderizará un gráfico de R.                                                                                                                                                                                                                                              |
+|                    | `renderPlot()`      | Función del lado del servidor que genera el código R para producir un gráfico y enviarlo a un `plotOutput` en la UI.                                                                                                                                                                                                               |
+|                    | `reactive()`        | Crea una expresión reactiva que recalcula su valor solo cuando las entradas de las que depende cambian, fundamental para la eficiencia en Shiny.                                                                                                                                                                                  |
+|                    | `observeEvent()`    | Ejecuta una porción de código en respuesta a un evento específico, como un clic de botón o un cambio en una entrada reactiva.                                                                                                                                                                                                      |
+|                    | `downloadHandler()` | Habilita la descarga de un archivo generado dinámicamente por la aplicación (ej. un informe HTML, un CSV).                                                                                                                                                                                                                         |
+|                    | `showModal()`       | Muestra una ventana emergente o modal al usuario.                                                                                                                                                                                                                                                                                  |
+|                    | `modalDialog()`     | Crea el contenido de la ventana modal, incluyendo título, cuerpo del mensaje y pie de página.                                                                                                                                                                                                                                      |
+|                    | `HTML()`            | Permite incluir directamente código HTML en la interfaz de usuario de Shiny, útil para un formato avanzado o elementos personalizados.                                                                                                                                                                                                |
+| `shinydashboard`   | `dashboardPage()`   | Función de nivel superior para configurar el diseño general de un dashboard estilo AdminLTE.                                                                                                                                                                                                                                        |
+|                    | `dashboardHeader()` | Define el encabezado del dashboard, donde comúnmente se coloca el título de la aplicación.                                                                                                                                                                                                                                          |
+|                    | `dashboardSidebar()`| Define la barra lateral del dashboard, a menudo conteniendo elementos de navegación y filtros.                                                                                                                                                                                                                                     |
+|                    | `dashboardBody()`   | El área principal del dashboard donde se muestra el contenido (gráficos, tablas, etc.).                                                                                                                                                                                                                                           |
+|                    | `menuItem()`        | Crea un elemento en el menú de la barra lateral, que al ser clicado, navega a una `tabItem` correspondiente.                                                                                                                                                                                                                       |
+|                    | `tabItems()`        | Un contenedor para múltiples `tabItem`s, lo que permite la navegación por pestañas dentro del cuerpo del dashboard.                                                                                                                                                                                                                |
+|                    | `tabItem()`         | Define el contenido de una pestaña individual dentro del `dashboardBody`, su `tabName` debe coincidir con un `menuItem`.                                                                                                                                                                                                           |
+|                    | `box()`             | Un contenedor visual que agrupa contenido relacionado, pudiendo tener título, ancho específico y diferentes estilos.                                                                                                                                                                                                                 |
+|                    | `valueBox()`        | Muestra un valor numérico importante con un subtítulo, un ícono y un color de fondo, ideal para resumir métricas clave.                                                                                                                                                                                                           |
+|                    | `infoBox()`         | Similar a `valueBox`, pero con un diseño diferente y opción de fondo relleno o solo borde.                                                                                                                                                                                                                                          |
+| `ggplot2`          | `ggplot()`          | La función inicial para crear un objeto de gráfico, especificando el dataframe y las asignaciones estéticas.                                                                                                                                                                                                                      |
+|                    | `aes()`             | Se utiliza dentro de `ggplot()` o `geom_*` para mapear variables de los datos a propiedades visuales del gráfico (ejes, colores, tamaños).                                                                                                                                                                                        |
+|                    | `geom_line()`       | Añade una capa de líneas al gráfico, comúnmente usada para visualizar series de tiempo.                                                                                                                                                                                                                                            |
+|                    | `geom_point()`      | Añade una capa de puntos al gráfico.                                                                                                                                                                                                                                                                                               |
+|                    | `labs()`            | Permite personalizar los títulos del gráfico, subtítulos, etiquetas de los ejes y leyendas.                                                                                                                                                                                                                                         |
+|                    | `theme()`           | Controla los aspectos no relacionados con los datos del gráfico, como las fuentes, colores de fondo, posición de la leyenda, etc.                                                                                                                                                                                                  |
+|                    | `element_text()`    | Se usa dentro de `theme()` para personalizar la apariencia del texto (fuente, tamaño, color, ángulo).                                                                                                                                                                                                                             |
+|                    | `facet_wrap()`      | Divide un gráfico en múltiples subgráficos (facets) basados en los niveles de una o más variables discretas.                                                                                                                                                                                                                     |
+| `dplyr`            | `filter()`          | Selecciona un subconjunto de filas de un dataframe basándose en una o más condiciones lógicas.                                                                                                                                                                                                                                     |
+|                    | `select()`          | Selecciona columnas específicas de un dataframe por nombre o por posición.                                                                                                                                                                                                                                                          |
+|                    | `mutate()`          | Crea nuevas columnas o modifica las existentes en un dataframe.                                                                                                                                                                                                                                                                    |
+|                    | `group_by()`        | Agrupa un dataframe por una o más variables, para que las operaciones subsiguientes se apliquen a cada grupo por separado.                                                                                                                                                                                                         |
+|                    | `summarise()`       | Reduce múltiples filas a una sola, resumiendo los datos para cada grupo (o para todo el dataframe).                                                                                                                                                                                                                                |
+|                    | `%>%` (pipe operator)| Permite encadenar operaciones de forma legible, pasando el resultado de una función como el primer argumento de la siguiente.                                                                                                                                                                                                        |
+| `DT`               | `DTOutput()`        | Un espacio reservado en la interfaz de usuario de Shiny donde se mostrará una tabla interactiva generada por `DT`.                                                                                                                                                                                                                   |
+|                    | `renderDT()`        | Función del lado del servidor que genera una tabla interactiva a partir de un dataframe y la envía a un `DTOutput`.                                                                                                                                                                                                               |
+|                    | `datatable()`       | La función principal para crear una tabla interactiva a partir de un dataframe, con funcionalidades como ordenar, buscar y paginar.                                                                                                                                                                                                  |
+| `readr`            | `read_delim()`      | Lee un archivo de texto donde las columnas están separadas por un delimitador específico (ej. `;`, `\t`). Útil para controlar el delimitador y el separador decimal.                                                                                                                                                                |
+|                    | `read_csv()`        | Una función conveniente para leer archivos CSV (separados por comas), siendo un wrapper de `read_delim` con `,` como delimitador por defecto.                                                                                                                                                                                    |
+| `shinyWidgets`     | `pickerInput()`     | Una versión mejorada y más flexible de `selectInput`, con características como búsqueda, selección múltiple con casillas de verificación y grupos de opciones.                                                                                                                                                                        |
+|                    | `awesomeButton()`   | Crea un botón con estilo y la opción de añadir íconos de Font Awesome, ofreciendo más opciones de personalización que el `actionButton` base de Shiny.                                                                                                                                                                                 |
+|                    | `actionBttn()`      | Otra función para crear botones de acción con varios estilos y colores predefinidos, útiles para una interfaz más atractiva.                                                                                                                                                                                                        |
+| `plotly`           | `ggplotly()`        | Convierte un objeto de gráfico `ggplot2` en un gráfico interactivo de `plotly`, añadiendo interactividad como tooltips, zoom y paneo.                                                                                                                                                                                                   |
+|                    | `plotlyOutput()`    | Un espacio reservado en la interfaz de usuario de Shiny para un gráfico interactivo de `plotly`.                                                                                                                                                                                                                                   |
+|                    | `renderPlotly()`    | Función del lado del servidor que genera un gráfico interactivo de `plotly` y lo envía a un `plotlyOutput`.                                                                                                                                                                                                                        |
+| `lubridate`        | `year()`            | Extrae el año de un objeto de fecha o fecha-hora.                                                                                                                                                                                                                                                                                  |
+|                    | `month()`           | Extrae el mes de un objeto de fecha o fecha-hora. Puede devolver el nombre del mes.                                                                                                                                                                                                                                                |
+|                    | `day()`             | Extrae el día del mes de un objeto de fecha o fecha-hora.                                                                                                                                                                                                                                                                          |
+|                    | `ymd()`, `mdy()`, `dmy()` | Funciones para parsear cadenas de caracteres a objetos de fecha, asumiendo diferentes formatos (año-mes-día, mes-día-año, día-mes-año respectivamente).                                                                                                                                                                            |
+| `tidyr`            | `pivot_longer()`    | Transforma datos de formato "ancho" a "largo", apilando múltiples columnas de mediciones en una sola.                                                                                                                                                                                                                             |
+|                    | `pivot_wider()`     | Transforma datos de formato "largo" a "ancho", creando nuevas columnas a partir de los valores de una columna existente.                                                                                                                                                                                                           |
